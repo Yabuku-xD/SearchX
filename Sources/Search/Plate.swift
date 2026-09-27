@@ -219,6 +219,9 @@ struct Quick: View {
             Text(title.said)
                 .font(.system(size: 11.5))
                 .foregroundStyle(tint)
+                // A small action is one word or two, never broken across lines.
+                .lineLimit(1)
+                .fixedSize()
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .frame(minWidth: 24, minHeight: 24)

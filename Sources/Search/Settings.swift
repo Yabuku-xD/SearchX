@@ -49,8 +49,15 @@ struct SettingsPanel: View {
     }
 
     private static let rail: CGFloat = 168
-    private static let width: CGFloat = 660
+    /// Wide enough that a line's small buttons — Rename and Delete beside a
+    /// colour — sit on one line each.
+    private static let width: CGFloat = 740
     private static let height: CGFloat = 500
+
+    /// Where the panel has been pulled to by its title bar, from the middle.
+    /// Each opening starts in the middle again.
+    @State private var moved: CGSize = .zero
+    @GestureState private var pulling: CGSize = .zero
 
     var body: some View {
         HStack(spacing: 0) {
@@ -66,9 +73,42 @@ struct SettingsPanel: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .shadow(color: .black.opacity(0.16), radius: 34, y: 12)
+        .offset(x: moved.width + pulling.width, y: moved.height + pulling.height)
         .onChange(of: page) { _, page in Store.settings.set(page.rawValue, forKey: "settings.page") }
         .onAppear(perform: takeAskedPage)
         .onChange(of: browser.tuningPage) { _, _ in takeAskedPage() }
+    }
+
+    /// The title bar, to move the panel by: it follows the pointer as it is
+    /// pulled, with nothing eased in between, and lets go wherever the
+    /// pointer stops — unless that is so far out that the title bar would be
+    /// out of reach, when it springs back until it isn't. A double-click
+    /// puts it back in the middle.
+    private var handle: some Gesture {
+        DragGesture(minimumDistance: 2, coordinateSpace: .global)
+            .updating($pulling) { value, pulling, _ in pulling = value.translation }
+            .onEnded { value in
+                let wanted = CGSize(width: moved.width + value.translation.width,
+                                    height: moved.height + value.translation.height)
+                moved = wanted
+                let kept = Self.inReach(wanted)
+                if kept != wanted { withAnimation(Motion.settle) { moved = kept } }
+            }
+    }
+
+    private func recentre() {
+        withAnimation(Motion.settle) { moved = .zero }
+    }
+
+    /// An offset that leaves at least a hand's width of the title bar inside
+    /// the window, whatever size the window is.
+    private static func inReach(_ offset: CGSize) -> CGSize {
+        guard let room = NSApp.keyWindow?.contentView?.bounds.size else { return offset }
+        let across = max(0, room.width / 2 + width / 2 - 120)
+        let down = max(0, room.height / 2 + height / 2 - 60)
+        let up = max(0, room.height / 2 - 40)
+        return CGSize(width: min(across, max(-across, offset.width)),
+                      height: min(down, max(-up, offset.height)))
     }
 
     /// The page ⌘K asked for, if it asked (see QuickCommands).
@@ -87,6 +127,10 @@ struct SettingsPanel: View {
                 .foregroundStyle(Palette.ink)
                 .padding(.horizontal, 10)
                 .padding(.top, 14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .gesture(handle)
+                .onTapGesture(count: 2, perform: recentre)
                 .padding(.bottom, 12)
             ForEach(Page.allCases) { item in
                 PageRow(page: item, on: page == item) { page = item }
@@ -142,6 +186,9 @@ struct SettingsPanel: View {
                 Spacer()
                 Door(icon: "xmark", help: "Done   esc") { browser.tuning = false }
             }
+            .contentShape(Rectangle())
+            .gesture(handle)
+            .onTapGesture(count: 2, perform: recentre)
             .padding(.bottom, 16)
 
             ScrollView(showsIndicators: false) {
@@ -1028,6 +1075,8 @@ struct Pill: View {
             Text(title.said)
                 .font(.system(size: 11.5))
                 .foregroundStyle(filled ? Palette.ground : tint)
+                .lineLimit(1)
+                .fixedSize()
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
                 .frame(minWidth: 24, minHeight: 26)

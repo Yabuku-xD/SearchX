@@ -182,6 +182,54 @@ enum NativeProbe {
             return ["started": true]
         case "drag-sent":
             return ["sent": NativeProbe.dragSent]
+        case "mouse":
+            // A hand on the window itself: press at X, Y (points from the top
+            // left of the window's content), move by DX, DY in STEPS, let go —
+            // or, with clicks 2, a double-click where it is.
+            guard let window, let content = window.contentView,
+                  let x = request["x"] as? Double, let y = request["y"] as? Double
+            else { return ["error": "window and x, y required"] }
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            let start = NSPoint(x: x, y: content.bounds.height - y)
+            func post(_ type: NSEvent.EventType, _ point: NSPoint, clicks: Int = 1) {
+                if let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                                                  timestamp: ProcessInfo.processInfo.systemUptime,
+                                                  windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                                                  clickCount: clicks, pressure: type == .leftMouseUp ? 0 : 1) {
+                    NSApp.postEvent(event, atStart: false)
+                }
+            }
+            if (request["clicks"] as? Int) == 2 {
+                for clicks in [1, 2] {
+                    post(.leftMouseDown, start, clicks: clicks)
+                    post(.leftMouseUp, start, clicks: clicks)
+                }
+                return ["clicked": 2]
+            }
+            if let lines = request["scroll"] as? Int {
+                // The scroll view under that point, moved to its end (or its
+                // start, for a positive count) — the part of a panel below
+                // the fold, to look at.
+                guard let hit = content.hitTest(start) else { return ["error": "nothing there"] }
+                var view: NSView? = hit
+                while let here = view, !(here is NSScrollView) { view = here.superview }
+                guard let scroller = view as? NSScrollView, let document = scroller.documentView
+                else { return ["error": "no scroll view there"] }
+                let bottom = document.isFlipped ? max(0, document.bounds.height - scroller.contentView.bounds.height) : 0
+                scroller.contentView.scroll(to: NSPoint(x: 0, y: lines < 0 ? bottom : (document.isFlipped ? 0 : bottom)))
+                scroller.reflectScrolledClipView(scroller.contentView)
+                return ["scrolled": lines]
+            }
+            let dx = request["dx"] as? Double ?? 0, dy = request["dy"] as? Double ?? 0
+            let steps = max(1, request["steps"] as? Int ?? 20)
+            post(.leftMouseDown, start)
+            for n in 1...steps {
+                let t = Double(n) / Double(steps)
+                post(.leftMouseDragged, NSPoint(x: start.x + dx * t, y: start.y - dy * t))
+            }
+            post(.leftMouseUp, NSPoint(x: start.x + dx, y: start.y - dy))
+            return ["dragged": [dx, dy]]
         case "fullscreen":
             guard let window else { return ["error": "no window"] }
             window.toggleFullScreen(nil)
