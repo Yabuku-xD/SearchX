@@ -30,7 +30,10 @@ struct GroupHeading: View {
     @State private var hovering = false
     @State private var dropping = false
     /// Waiting on the Character Viewer: the icon's slot is a field it types into.
-    @State private var choosing = false
+    private var choosing: Bool {
+        get { window.choosingIconFor == group.id }
+        nonmutating set { window.choosingIconFor = newValue ? group.id : (window.choosingIconFor == group.id ? nil : window.choosingIconFor) }
+    }
     @State private var picked = ""
     @FocusState private var focused: Bool
     @FocusState private var picking: Bool
@@ -161,6 +164,15 @@ struct GroupHeading: View {
                 }
                 .onChange(of: picking) { _, now in if !now { choosing = false } }
                 .onExitCommand { choosing = false }
+                // Closed without a pick: done choosing, and the column is
+                // free to fold again. Looked for only while it is up.
+                .task {
+                    try? await Task.sleep(for: .milliseconds(800))
+                    while !Task.isCancelled, choosing {
+                        if !GroupHeading.pickerShowing() { choosing = false; break }
+                        try? await Task.sleep(for: .milliseconds(400))
+                    }
+                }
                 .frame(width: 15)
         } else if let emoji = group.emoji {
             Text(emoji)
@@ -184,6 +196,16 @@ struct GroupHeading: View {
         DispatchQueue.main.async {
             picking = true
             DispatchQueue.main.async { NSApp.orderFrontCharacterPalette(nil) }
+        }
+    }
+
+    /// Whether the Mac's emoji picker has a window on screen. Its owner's
+    /// name is in the Mac's language; its bundle id is not.
+    static func pickerShowing() -> Bool {
+        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        return list.contains { info in
+            guard let pid = info[kCGWindowOwnerPID as String] as? pid_t else { return false }
+            return NSRunningApplication(processIdentifier: pid)?.bundleIdentifier == "com.apple.CharacterPaletteIM"
         }
     }
 

@@ -357,7 +357,6 @@ struct ContentView: View {
     var browser: Browser { window.profile }
 
     @State private var host: NSWindow?
-    @State private var resting: RestingLights?
     @State private var touchBar: TouchBar?
     /// The room the page leaves for the column and the strip, set without
     /// animation (see `make(room:after:)`); nil only before the window is up.
@@ -688,23 +687,18 @@ struct ContentView: View {
                     browser.prefs.sidebar && browser.prefs.sidePosition == .right
                         ? host.frame.width - browser.prefs.sideWidth + Lights.centre.x
                         : Lights.centre.x
-                }) { measureLights() }
+                }) {}
             }
             .onChange(of: browser.prefs.sidebar) { _, _ in
-                DispatchQueue.main.async { Lights.refresh(host); measureLights() }
+                DispatchQueue.main.async { Lights.refresh(host) }
             }
             .onChange(of: browser.prefs.sidePosition) { _, _ in
-                DispatchQueue.main.async { Lights.refresh(host); measureLights() }
+                DispatchQueue.main.async { Lights.refresh(host) }
             }
             .onChange(of: browser.prefs.sideWidth) { _, _ in
-                DispatchQueue.main.async { Lights.refresh(host); measureLights() }
+                DispatchQueue.main.async { Lights.refresh(host) }
             }
-            // Stepping away to another app: macOS draws its own resting
-            // buttons, and on a light window they come out nearly white. Ours
-            // go on in their place until the app comes back.
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
-                measureLights()
-                resting?.isHidden = false
                 // Only from the window in front. Every window answering
                 // lifted the video once per window.
                 if browser.key === window { browser.appLeft() }
@@ -717,7 +711,6 @@ struct ContentView: View {
                 if let host, (note.object as? NSWindow) === host { browser.close(window) }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-                resting?.isHidden = true
                 if browser.key === window { browser.appBack() }
             }
             .onChange(of: window.fieldShowing) { _, showing in
@@ -907,26 +900,6 @@ struct ContentView: View {
         return browser.prefs.sidebar || window.folded ? 0 : browser.prefs.topBarHeight
     }
 
-    /// Put the resting circles in the title bar, exactly over the buttons.
-    private func measureLights() {
-        guard let host,
-              let close = host.standardWindowButton(.closeButton),
-              let titlebar = close.superview
-        else { return }
-
-        let view = resting ?? RestingLights()
-        if view.superview !== titlebar {
-            view.frame = titlebar.bounds
-            view.autoresizingMask = [.width, .height]
-            titlebar.addSubview(view, positioned: .above, relativeTo: nil)
-            resting = view
-        }
-        view.spots = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
-            .compactMap { host.standardWindowButton($0) }
-            .map { $0.convert($0.bounds, to: titlebar) }
-        view.isHidden = NSApp.isActive
-    }
-
     private func dress(_ host: NSWindow) {
         browser.claim(host, for: window)
         if let frame = window.frameRequest {
@@ -962,8 +935,7 @@ struct ContentView: View {
             browser.prefs.sidebar && browser.prefs.sidePosition == .right
                 ? host.frame.width - browser.prefs.sideWidth + Lights.centre.x
                 : Lights.centre.x
-        }) { measureLights() }
-        DispatchQueue.main.async { measureLights() }
+        }) {}
 
         // The traffic lights are drawn — measured, they paint themselves — but
         // the window shows white where they are. The content view fills the

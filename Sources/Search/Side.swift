@@ -26,6 +26,11 @@ struct SideBar: View {
     @Namespace private var pill
 
     @State private var landing = false
+    /// False for the column's first frame on screen. Whatever is in it
+    /// arrives with it, on its slide; a row or a pin makes its own entrance
+    /// only when it is added to a column already there. Each running its own
+    /// as the folded column came out made them drift apart as it slid.
+    @State private var settled = false
     /// The width the column had when the edge was picked up.
     @State private var grabbed: CGFloat?
     @State private var onEdge = false
@@ -115,6 +120,8 @@ struct SideBar: View {
         .animation(Motion.glide, value: window.editingTab)
         .animation(Motion.settle, value: window.tabs.map(\.id))
         .animation(Motion.settle, value: window.pinnedCount)
+        .environment(\.columnSettled, settled)
+        .onAppear { DispatchQueue.main.async { settled = true } }
     }
 
     /// The column's edge: pull it to make the column wider or narrower,
@@ -577,6 +584,7 @@ private struct PinGrid: Layout {
 /// its row asks for, but never taller than the classic square, so a row with
 /// room to spare turns into a wide, short button rather than a bigger icon.
 private struct PinSquare: View {
+    @Environment(\.columnSettled) private var settled
     @ObservedObject var window: WindowModel
     @ObservedObject var prefs: Preferences
     @ObservedObject var tab: Tab
@@ -635,12 +643,13 @@ private struct PinSquare: View {
         .contextMenu { TabMenu(window: window, tab: tab, close: { window.close(tab) }) }
         .help(tab.label)
         .animation(Motion.quick, value: hovering)
-        .transition(.scale(scale: 0.8).combined(with: .opacity))
+        .transition(settled ? .scale(scale: 0.8).combined(with: .opacity) : .identity)
     }
 }
 
 /// One tab, as a line in the column.
 private struct SideRow: View {
+    @Environment(\.columnSettled) private var settled
     @ObservedObject var window: WindowModel
     @ObservedObject var prefs: Preferences
     @ObservedObject var tab: Tab
@@ -770,7 +779,7 @@ private struct SideRow: View {
             shake = 0
             withAnimation(Motion.easeOut(0.5)) { shake = 1 }
         }
-        .transition(.scale(scale: 0.94, anchor: .leading).combined(with: .opacity))
+        .transition(settled ? .scale(scale: 0.94, anchor: .leading).combined(with: .opacity) : .identity)
     }
 
     @ViewBuilder
@@ -901,5 +910,18 @@ struct Door: View {
         .accessibilityLabel((help.isEmpty ? icon : help).said)
         .onHover { hovering = $0 }
         .help(help.said)
+    }
+}
+
+private struct ColumnSettledKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+extension EnvironmentValues {
+    /// Whether the column holding a row has been on screen for a frame (see
+    /// SideBar.settled). Elsewhere a row is always settled.
+    var columnSettled: Bool {
+        get { self[ColumnSettledKey.self] }
+        set { self[ColumnSettledKey.self] = newValue }
     }
 }

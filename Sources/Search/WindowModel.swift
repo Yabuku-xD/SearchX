@@ -32,6 +32,10 @@ final class WindowModel: ObservableObject, Identifiable {
     /// Named tab sections in the current space, in display order.
     @Published var tabGroups: [TabGroup] = []
     @Published var editingGroupID: UUID?
+    /// The group whose icon the Mac's emoji picker is choosing. The picker
+    /// is another app's window: the column, out over the page, stays while
+    /// it is up rather than folding away under it.
+    @Published var choosingIconFor: UUID?
     @Published var editingSidebarBookmarkID: Bookmark.ID?
     @Published var splitPairs: [SplitPair] = []
     @Published var pendingSplit: Tab.ID?

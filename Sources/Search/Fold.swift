@@ -204,6 +204,9 @@ struct Fold: View {
         .onChange(of: window.editingTab) { _, editing in
             if editing == nil, !inside, window.peeking { peek(false) }
         }
+        .onChange(of: window.choosingIconFor) { _, choosing in
+            if choosing == nil, !inside, window.peeking { peek(false) }
+        }
     }
 
     /// Folded, and not taken over by a page filling the screen.
@@ -309,7 +312,7 @@ struct Fold: View {
             guard leaving == nil else { return }
             let going = DispatchWorkItem {
                 leaving = nil
-                guard window.editingTab == nil, window.editingGroupID == nil,
+                guard window.editingTab == nil, window.editingGroupID == nil, window.choosingIconFor == nil,
                       window.editingSidebarBookmarkID == nil else { return }
                 window.peek(false)
             }
@@ -318,9 +321,8 @@ struct Fold: View {
         }
     }
 
-    /// The title bar's own view holds the three buttons and the resting
-    /// circles drawn over them while the app is behind (see RestingLights),
-    /// so hiding it hides both, and hidden buttons take no clicks.
+    /// The title bar's own view holds the three buttons, so hiding it hides
+    /// them, and hidden buttons take no clicks.
     private func hideLights() {
         guard let bar = titlebar else { return }
         // AppKit moves this view into its fullscreen title bar. Folding must

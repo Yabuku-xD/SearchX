@@ -49,6 +49,12 @@ enum AuditProbe {
         case "update":
             // Settings › About's Update button.
             Updater.shared.update()
+        case "pickIcon":
+            // Choose Icon… on a group: the column held out, the Mac's emoji
+            // picker brought up.
+            guard let id = group() else { return ["error": "no such group"] }
+            window.choosingIconFor = id
+            NSApp.orderFrontCharacterPalette(nil)
         case "focus":
             window.toggleFocus()
         case "power":

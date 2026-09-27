@@ -668,33 +668,6 @@ struct DragStrip: NSViewRepresentable {
 }
 
 
-/// The three buttons as they look when the app is not the one you are using.
-///
-/// macOS does draw its own in that state, but in a light window they come out
-/// nearly white on white — Apple's own choice, and the reason a pale window
-/// looks like it has lost its controls while a dark one does not. So the
-/// system's are put away and these are drawn in exactly their place, read from
-/// the real buttons rather than guessed at.
-///
-/// It lives inside the title bar rather than in the window's content, because
-/// the title bar draws above everything the app puts on screen.
-final class RestingLights: NSView {
-    /// Set again each time the title bar is laid out — every change of
-    /// screen, key window or size — and redrawn only when they moved.
-    var spots: [CGRect] = [] {
-        didSet { if spots != oldValue { needsDisplay = true } }
-    }
-
-    override func draw(_ dirty: NSRect) {
-        Palette.NS.resting.setFill()
-        for spot in spots { NSBezierPath(ovalIn: spot).fill() }
-    }
-
-    /// Never in the way of a click: the real buttons are underneath, and they
-    /// come back the moment the app does.
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-}
-
 /// The picture a waking tab shows until its page paints: filling the stage,
 /// anchored at the top left where the page starts, cropped past the edges.
 final class CoverView: NSView {
