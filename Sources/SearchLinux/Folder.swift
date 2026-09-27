@@ -1,11 +1,11 @@
 import Foundation
 
-// Where this browser keeps things on Linux: $XDG_DATA_HOME/search, which is
-// ~/.local/share/search unless somebody moved it.
+// Where this browser keeps things on Linux: $XDG_DATA_HOME/searchx, which is
+// ~/.local/share/searchx unless somebody moved it.
 //
 // The Mac's rule holds here too: a run from the build folder, or one started
 // with SEARCH_PROBE set, is a test run, and a test run never touches the
-// folder of the browser somebody actually uses. It gets "search (test)".
+// folder of the browser somebody actually uses. It gets "searchx (test)".
 
 enum Folder {
     static var testing: Bool {
@@ -19,7 +19,7 @@ enum Folder {
         let environment = ProcessInfo.processInfo.environment
         let data = environment["XDG_DATA_HOME"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/share")
-        let home = data.appendingPathComponent(testing ? "search (test)" : "search", isDirectory: true)
+        let home = data.appendingPathComponent(testing ? "searchx (test)" : "searchx", isDirectory: true)
         try? FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         return home
     }()

@@ -159,6 +159,14 @@ Every binding can be changed in Settings › Shortcuts. The defaults live in [Sh
 
 </details>
 
+## Install
+
+**Mac.** Download `SearchX.dmg` from the [latest release](https://github.com/Yabuku-xD/SearchX/releases/latest), open it and drag SearchX into Applications. It runs on macOS 14 or later, on Apple silicon and Intel.
+
+This build isn't notarised by Apple yet, so the first time you open it macOS says it can't check it. Open **System Settings › Privacy & Security**, scroll down and click **Open Anyway** beside SearchX, then open it again. You only do this once.
+
+**Linux (early preview).** Download `searchx-linux-x86_64.tar.gz` or `searchx-linux-arm64.tar.gz` from the same release. It needs GTK 4 and WebKitGTK 6.0 (`sudo apt install libgtk-4-1 libwebkitgtk-6.0-4` on Ubuntu 24.04), and the `README.txt` inside shows how to run or install it. The preview has tabs, the address field, the ad blocker and sessions; the rest of SearchX is still Mac-only (see [PORTING.md](PORTING.md)).
+
 ## Build it yourself
 
 You need macOS 14 or later and a full Xcode with Swift 6.

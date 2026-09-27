@@ -25,7 +25,7 @@ final class Browser {
 
     init(application: UnsafeMutablePointer<GtkApplication>) {
         window = gtk_application_window_new(application)
-        gtk_window_set_title(search_window(raw(window)), "Search")
+        gtk_window_set_title(search_window(raw(window)), "SearchX")
         gtk_window_set_default_size(search_window(raw(window)), 1280, 820)
 
         // WebKit's own store for cookies and sign-ins, in the browser's folder.

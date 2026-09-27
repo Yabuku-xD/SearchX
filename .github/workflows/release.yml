@@ -1,0 +1,50 @@
+name: Release
+
+# The Linux preview, built and attached whenever a release is published. The
+# Mac disk image is built and signed on a Mac and attached by hand (see
+# build.sh), since a Developer ID never leaves the Mac it lives on.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release to attach the Linux builds to
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    container: swift:6.1-noble
+    steps:
+      - uses: actions/checkout@v5
+      - run: apt-get update && apt-get install -y libwebkitgtk-6.0-dev libgtk-4-dev binutils
+      # Swift's own runtime inside the binary: the machines it runs on have
+      # GTK and WebKitGTK, not Swift.
+      - run: swift build -c release --product SearchLinux --static-swift-stdlib
+      - name: Package
+        run: |
+          dir=searchx-linux-${{ matrix.arch }}
+          mkdir -p "$dir"
+          cp .build/release/SearchLinux "$dir/searchx"
+          strip "$dir/searchx"
+          cp Packaging/linux/searchx.desktop Packaging/linux/README.txt LICENSE "$dir/"
+          cp .github/icon.png "$dir/searchx.png"
+          # Nothing of Swift may be left to find on the system, and nothing
+          # the system has to have may be missing.
+          ! ldd "$dir/searchx" | grep -E 'not found|libswift|libFoundation'
+          tar czf "$dir.tar.gz" "$dir"
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name || inputs.tag }}
+          files: searchx-linux-${{ matrix.arch }}.tar.gz

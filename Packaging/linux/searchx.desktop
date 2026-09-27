@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=SearchX
+GenericName=Web Browser
+Comment=A small, fast, private web browser
+Exec=searchx %u
+Icon=searchx
+Terminal=false
+Categories=Network;WebBrowser;
+MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;
+StartupWMClass=com.shyamalankannan.searchx
