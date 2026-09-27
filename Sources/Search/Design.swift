@@ -118,7 +118,9 @@ enum Metrics {
     static let fieldWidth: CGFloat = 560
     /// The column of titles down the left, in the way that has one.
     static let side: CGFloat = 232
-    static let sideMin: CGFloat = 176
+    /// The lights, then four doors — the sidebar's own, back, forward and
+    /// reload — with the column's margin either side.
+    static let sideMin: CGFloat = 10 + sideLights + 4 * 26 + 3 * 4 + 10
     static let sideMax: CGFloat = 440
 
     /// An extension side panel, docked on the right of the page (see

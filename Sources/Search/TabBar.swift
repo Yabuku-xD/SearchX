@@ -892,25 +892,27 @@ struct TabMenu: View {
             window.copyMarkdownLink()
         }
 
-        Button("Copy URLs") {
-            window.copySelectedAddresses()
+        // The tab this menu was opened on, or every chosen tab when it is
+        // one of them: never the tab that just happens to be on screen.
+        let chosen = window.menuTabs(for: tab)
+        if chosen.count > 1 {
+            Button("Copy \(chosen.count) Addresses") { window.copyAddresses(of: chosen) }
+                .disabled(!chosen.contains { $0.showsPage && $0.address != nil })
         }
-            .disabled(!window.canCopySelectedAddresses)
-            .help("Copy the addresses of every tab you have chosen")
 
         Divider()
 
-        Button("Unload Selected") {
-            window.unloadSelectedTabs()
+        Button(chosen.count > 1 ? "Unload \(chosen.count) Tabs" : "Unload Tab") {
+            window.unload(chosen)
         }
-            .disabled(!window.canUnloadSelected)
-            .help("Give the pages of the chosen tabs back")
+            .disabled(!chosen.contains { !$0.isBlank && !$0.asleep })
+            .help("Let go of the page until it is opened again; it keeps its place")
 
-        Button("Unload Others") {
-            window.unloadOtherTabs()
+        Button("Unload Other Tabs") {
+            window.unloadTabs(besides: chosen)
         }
-            .disabled(!window.canUnloadOthers)
-            .help("Keep the active and selected tabs awake")
+            .disabled(!window.canUnload(besides: chosen))
+            .help("Let go of every other page except the one on screen")
         Button("Open in New Window") { window.detach(tab) }
             .disabled(tab.pin != nil)
         Button(tab.muted ? "Unmute Tab" : "Mute Tab") { tab.toggleMute() }

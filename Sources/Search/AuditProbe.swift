@@ -55,6 +55,18 @@ enum AuditProbe {
             guard let id = group() else { return ["error": "no such group"] }
             window.choosingIconFor = id
             NSApp.orderFrontCharacterPalette(nil)
+        case "tabMenu":
+            // A tab's own menu, opened on `id` (see TabMenu): what it acts on.
+            guard let target = tab() else { return ["error": "no such tab"] }
+            if let ids = request["select"] as? [String] {
+                window.selectedTabs = Set(window.tabs.filter { t in ids.contains { t.id.uuidString.lowercased().hasPrefix($0) } }.map(\.id))
+            }
+            let chosen = window.menuTabs(for: target)
+            switch request["act"] as? String {
+            case "unload": window.unload(chosen)
+            case "unloadOthers": window.unloadTabs(besides: chosen)
+            default: break
+            }
         case "focus":
             window.toggleFocus()
         case "power":

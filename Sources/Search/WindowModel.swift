@@ -591,6 +591,30 @@ final class WindowModel: ObservableObject, Identifiable {
         profile.writeSession()
     }
 
+    /// A tab carried in the column lands in a section — a group, or none —
+    /// just before `other`, or at the end of that section. One call for
+    /// moving within a group, into one, out of one and between two.
+    func place(_ tab: Tab, inGroup group: UUID?, before other: Tab?) {
+        guard tab.pin == nil, let here = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        let grouping = profile.prefs.usesTabGroups
+        let section = grouping ? group : tab.groupID
+        var list = tabs
+        list.remove(at: here)
+        if grouping, tab.groupID != group { tab.groupID = group }
+        let at: Int
+        if let other, other.id != tab.id, let index = list.firstIndex(where: { $0.id == other.id }) {
+            at = index
+        } else if let last = list.lastIndex(where: { $0.pin == nil && (!grouping || $0.groupID == section) }) {
+            at = last + 1
+        } else {
+            at = list.count
+        }
+        list.insert(tab, at: at)
+        tabs = list
+        if grouping { arrangeGroupedTabs() }
+        profile.rememberSession()
+    }
+
     func arrangeGroupedTabs() {
         let pins = tabs.filter { $0.pin != nil }
         let grouped = tabGroups.flatMap { group in tabs.filter { $0.pin == nil && $0.groupID == group.id } }
@@ -758,7 +782,7 @@ final class WindowModel: ObservableObject, Identifiable {
 
     /// A link a page sent to a tab of its own. Back from that tab's first
     /// page closes it and returns to the page (see Tab.returnTo) — unlike a
-    /// tab you opened yourself, from a bookmark or with ⌘D — when Settings
+    /// tab you opened yourself, from a bookmark or with ⇧⌘D — when Settings
     /// says so.
     @discardableResult
     func openFromPage(_ url: URL, foreground: Bool, from page: Tab) -> Tab {
@@ -867,7 +891,7 @@ final class WindowModel: ObservableObject, Identifiable {
         }
     }
 
-    /// ⌘D. The same page, beside itself.
+    /// ⇧⌘D. The same page, beside itself.
     func duplicate() {
         guard active?.showsPage == true, let url = active?.address else { return }
         open(url, foreground: true, from: active)

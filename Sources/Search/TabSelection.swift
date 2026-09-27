@@ -62,8 +62,29 @@ extension WindowModel {
         }
     }
 
-    func copySelectedAddresses() {
-        let addresses = chosenTabs.filter { $0.showsPage }.compactMap { $0.address?.absoluteString }
+    /// What a tab's menu acts on: the tab it was opened on — or, when that
+    /// tab is one of several chosen, all of them, as the Finder does. Never
+    /// some other tab that happens to be on screen.
+    func menuTabs(for tab: Tab) -> [Tab] {
+        guard selectedTabs.count > 1, selectedTabs.contains(tab.id) else { return [tab] }
+        return tabs.filter { selectedTabs.contains($0.id) }
+    }
+
+    /// Every tab but these, and the one on screen, let go of.
+    func unloadTabs(besides kept: [Tab]) {
+        let ids = Set(kept.map(\.id)).union(activeID.map { [$0] } ?? [])
+        unload(tabs.filter { !ids.contains($0.id) })
+    }
+
+    func canUnload(besides kept: [Tab]) -> Bool {
+        let ids = Set(kept.map(\.id)).union(activeID.map { [$0] } ?? [])
+        return tabs.contains { !ids.contains($0.id) && !$0.isBlank && !$0.asleep }
+    }
+
+    func copySelectedAddresses() { copyAddresses(of: chosenTabs) }
+
+    func copyAddresses(of chosen: [Tab]) {
+        let addresses = chosen.filter { $0.showsPage }.compactMap { $0.address?.absoluteString }
         guard !addresses.isEmpty else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(addresses.joined(separator: "\n"), forType: .string)

@@ -153,6 +153,9 @@ struct ShortcutCommand: Identifiable {
         ShortcutCommand("file.newPrivateTab", "New Private Tab", .file, nil) { _, window in window.newShyTab() },
         ShortcutCommand("file.reopen", "Reopen Closed Tab", .file, KeyCombo("t", shift: true)) { _, window in window.reopen() },
         ShortcutCommand("file.openAddress", "Open Address…", .file, KeyCombo("l")) { _, window in window.edit() },
+        ShortcutCommand("file.closeWindow", "Close Window", .file, KeyCombo("w", shift: true)) { browser, window in
+            browser.host(of: window)?.performClose(nil)
+        },
         ShortcutCommand("file.closeTab", "Close Tab", .file, KeyCombo("w")) { browser, window in
             if let tab = window.active { browser.closeTab(tab) }
         },
@@ -169,6 +172,7 @@ struct ShortcutCommand: Identifiable {
         ShortcutCommand("view.splitColumns", "Split Side by Side", .view, nil) { _, window in window.setSplitLayout(.columns) },
         ShortcutCommand("view.splitRows", "Split Stacked", .view, nil) { _, window in window.setSplitLayout(.rows) },
         ShortcutCommand("view.splitGrid", "Split in a Grid", .view, nil) { _, window in window.setSplitLayout(.grid) },
+        ShortcutCommand("view.stop", "Stop Loading", .view, KeyCombo(".")) { _, window in window.active?.stop() },
         ShortcutCommand("view.reload", "Reload Page", .view, KeyCombo("r")) { _, window in window.reload() },
         ShortcutCommand("view.reloadOrigin", "Reload Page From Origin", .view, KeyCombo("r", option: true)) { _, window in window.reload(fromOrigin: true) },
         ShortcutCommand("view.reader", "Reading Mode", .view, KeyCombo("r", shift: true)) { _, window in window.toggleReader() },
@@ -195,7 +199,7 @@ struct ShortcutCommand: Identifiable {
             guard let tab = window.active, tab.showsPage else { return }
             if tab.pin == nil { window.pin(tab) } else { window.unpin(tab) }
         },
-        ShortcutCommand("tabs.duplicate", "Duplicate Tab", .tabs, KeyCombo("d")) { _, window in window.duplicate() },
+        ShortcutCommand("tabs.duplicate", "Duplicate Tab", .tabs, KeyCombo("d", shift: true)) { _, window in window.duplicate() },
         ShortcutCommand("tabs.copyAddress", "Copy Address", .tabs, KeyCombo("c", shift: true)) { _, window in window.copyAddress() },
         ShortcutCommand("tabs.pasteAndGo", "Paste and Go", .tabs, KeyCombo("v", shift: true)) { _, window in window.pasteAndGo() },
         // ⌘⇧K, which the tab switcher laid claim to first. ⌘K alone is still
@@ -208,8 +212,11 @@ struct ShortcutCommand: Identifiable {
             if let tab = window.active { window.openInPanel(tab) }
         },
 
-        ShortcutCommand("bookmarks.add", "Add This Page", .bookmarks, KeyCombo("b", shift: true)) { browser, _ in browser.bookmarkCurrent() },
+        ShortcutCommand("bookmarks.add", "Add This Page", .bookmarks, KeyCombo("d")) { browser, _ in browser.bookmarkCurrent() },
         ShortcutCommand("bookmarks.show", "Show Bookmarks…", .bookmarks, nil) { browser, _ in browser.bookmarking = true },
+        ShortcutCommand("bookmarks.bar", "Show Bookmarks Bar", .bookmarks, KeyCombo("b", shift: true)) { browser, _ in
+            withAnimation(Motion.glide) { browser.prefs.bookmarksBar.toggle() }
+        },
 
         ShortcutCommand("history.show", "Show History…", .history, KeyCombo("y")) { browser, _ in browser.recalling.toggle() },
         ShortcutCommand("history.downloads", "Downloads…", .history, KeyCombo("j", shift: true)) { browser, _ in browser.hoarding.toggle() },

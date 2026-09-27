@@ -52,6 +52,8 @@ private struct SearchCommands: Commands {
                 Divider()
                 Button("Close Tab") { if let tab = browser.key?.active { browser.closeTab(tab) } }
                     .shortcut("file.closeTab", browser.shortcuts)
+                Button("Close Window") { browser.keyHost?.performClose(nil) }
+                    .shortcut("file.closeWindow", browser.shortcuts)
             }
             CommandGroup(replacing: .printItem) {
                 Button("Share…") { browser.share() }
@@ -96,6 +98,9 @@ private struct SearchCommands: Commands {
                     }
                 }
                 Divider()
+                Button("Stop Loading") { browser.key?.active?.stop() }
+                    .shortcut("view.stop", browser.shortcuts)
+                    .disabled(browser.key?.active?.loading != true)
                 Button("Reload Page") { browser.key?.reload() }
                     .shortcut("view.reload", browser.shortcuts)
                 Button("Reload Page From Origin") { browser.key?.reload(fromOrigin: true) }
@@ -230,6 +235,7 @@ private struct SearchCommands: Commands {
                     get: { browser.prefs.bookmarksBar },
                     set: { on in withAnimation(Motion.glide) { browser.prefs.bookmarksBar = on } }
                 ))
+                .shortcut("bookmarks.bar", browser.shortcuts)
                 // The bookmarks themselves follow, put in by AppKit (see
                 // BookmarkMenu in Bookmarks.swift).
             }
@@ -1018,7 +1024,7 @@ struct ContentView: View {
     /// Search's keys are Search's. The keys that make and close tabs and move
     /// between them stay Search's first, as Chrome keeps them its own.
     private static func pageFirst(_ event: NSEvent, key: String, shifted: Bool, browser: Browser) -> Bool {
-        let reserved = (key == "t") || (key == "w" && !shifted) || (key == "n")
+        let reserved = (key == "t") || (key == "w") || (key == "n")
             || ((key == "[" || key == "]" || key == "{" || key == "}") && shifted)
             || (key == "k" && shifted)
             || (key == "z" && browser.veiling)
@@ -1199,6 +1205,16 @@ struct ContentView: View {
             return true
         }
 
+        // ⌥⌘→ and ⌥⌘←, Chrome's way between tabs, beside ⇧⌘] and ⌃⇥ —
+        // except in a field, where they belong to the text.
+        if flags.contains(.option), !shifted, !flags.contains(.control),
+           event.keyCode == 123 || event.keyCode == 124,
+           window.active?.typing != true, window.active?.built?.inputContext == nil,
+           !(event.window?.firstResponder is NSTextView) {
+            window.step(event.keyCode == 124 ? 1 : -1)
+            return true
+        }
+
         // Other shortcuts with ⌥ or ⌃ on top are somebody else's.
         guard !flags.contains(.option), !flags.contains(.control) else { return false }
 
@@ -1240,7 +1256,14 @@ struct ContentView: View {
         case "c" where shifted:
             window.copyAddress()
         case "d" where !shifted:
+            browser.bookmarkCurrent()
+        case "d" where shifted:
             window.duplicate()
+        case "w" where shifted:
+            browser.host(of: window)?.performClose(nil)
+        case ".":
+            guard window.active?.loading == true else { return false }
+            window.active?.stop()
         case "n" where !shifted:
             browser.open()
         case "n" where shifted:
@@ -1290,7 +1313,7 @@ struct ContentView: View {
             // The column or the strip, folded away (see Fold.swift).
             window.toggleFold()
         case "b" where shifted:
-            browser.bookmarkCurrent()
+            withAnimation(Motion.glide) { browser.prefs.bookmarksBar.toggle() }
         case "," where !shifted:
             browser.tuning.toggle()
         case "h" where shifted:

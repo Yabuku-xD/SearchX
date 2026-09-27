@@ -148,11 +148,11 @@ A private window (`⇧⌘N`) keeps its own temporary cookie jar and stays out of
 |---|---|---|
 | `⌘L` address | `⌘T` new tab | `⇧⌘R` reading mode |
 | `⌘[` `⌘]` back, forward | `⌘W` close | `⇧⌘P` float the video |
-| `⌘F` find | `⇧⌘T` reopen | `⇧⌘H` hide something |
+| `⌘F` find · `⌘.` stop | `⇧⌘T` reopen | `⇧⌘H` hide something |
 | `⇧⌘C` copy address | `⌘K` tabs and commands | `⇧⌘U` what's hidden |
-| `⇧⌘V` paste and go | `⇧⌘[` `⇧⌘]` previous, next | `⇧⌘B` bookmark |
+| `⇧⌘V` paste and go | `⇧⌘[` `⇧⌘]` or `⌥⌘←` `⌥⌘→` previous, next | `⌘D` bookmark · `⇧⌘B` bookmarks bar |
 | `⌘Y` history | `⌘1`–`⌘9` jump | `⌥⌘L` passwords |
-| `⇧⌘J` downloads | `⌘D` duplicate | `⌘,` settings |
+| `⇧⌘J` downloads | `⇧⌘D` duplicate · `⇧⌘W` close window | `⌘,` settings |
 | | `⇧⌘S` top or side · `⌘S` fold | `⇧⌘F` focus mode |
 
 Every binding can be changed in Settings › Shortcuts. The defaults live in [Shortcuts.swift](Sources/Search/Shortcuts.swift).

@@ -25,6 +25,10 @@ struct GroupHeading: View {
     /// The coordinate space to report this heading’s frame into, when the
     /// layout it is in wants it for drops.
     var dragSpace: String? = nil
+    /// Carried by the column's own drag (see SideBar.carry), which lifts
+    /// the heading and folds its tabs under it. The strip across the top
+    /// still hands the group over by the system's drag.
+    var carried = false
 
     @State private var draft = ""
     @State private var hovering = false
@@ -93,25 +97,7 @@ struct GroupHeading: View {
                 DispatchQueue.main.async { focused = true }
             }
         }
-        // Still the tab’s own string being carried: the layouts already put a
-        // tab’s id on the pasteboard, and the heading reads that here rather
-        // than a second format.
-        .onDrop(of: [.text], isTargeted: $dropping) { providers in
-            guard let provider = providers.first(where: { $0.canLoadObject(ofClass: String.self) })
-            else { return false }
-            _ = provider.loadObject(ofClass: String.self) { value, _ in
-                guard let value else { return }
-                DispatchQueue.main.async {
-                    if value.hasPrefix("search-group:"),
-                       let id = UUID(uuidString: String(value.dropFirst("search-group:".count))),
-                       let index = window.tabGroups.firstIndex(where: { $0.id == group.id }) {
-                        window.moveTabGroup(id, to: index)
-                    }
-                }
-            }
-            return true
-        }
-        .onDrag { NSItemProvider(object: "search-group:\(group.id.uuidString)" as NSString) }
+        .modifier(GroupPasteboard(window: window, group: group, dropping: $dropping, enabled: !carried))
         .contextMenu {
             Button("Rename Group") { window.editingGroupID = group.id }
             Button("Choose Icon…") { choose() }
@@ -261,5 +247,41 @@ extension WindowModel {
     func pinGroup(_ id: UUID) {
         for tab in tabs(in: id) where tab.showsPage { pin(tab) }
         if tabs(in: id).isEmpty { removeTabGroup(id) }
+    }
+}
+
+/// The system's drag and drop for a heading, where the layout has no drag of
+/// its own for groups.
+private struct GroupPasteboard: ViewModifier {
+    @ObservedObject var window: WindowModel
+    let group: TabGroup
+    @Binding var dropping: Bool
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+            // Still the tab’s own string being carried: the layouts already put a
+            // tab’s id on the pasteboard, and the heading reads that here rather
+            // than a second format.
+            .onDrop(of: [.text], isTargeted: $dropping) { providers in
+                guard let provider = providers.first(where: { $0.canLoadObject(ofClass: String.self) })
+                else { return false }
+                _ = provider.loadObject(ofClass: String.self) { value, _ in
+                    guard let value else { return }
+                    DispatchQueue.main.async {
+                        if value.hasPrefix("search-group:"),
+                           let id = UUID(uuidString: String(value.dropFirst("search-group:".count))),
+                           let index = window.tabGroups.firstIndex(where: { $0.id == group.id }) {
+                            window.moveTabGroup(id, to: index)
+                        }
+                    }
+                }
+                return true
+            }
+            .onDrag { NSItemProvider(object: "search-group:\(group.id.uuidString)" as NSString) }
+        } else {
+            content
+        }
     }
 }

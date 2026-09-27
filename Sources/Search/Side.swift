@@ -34,7 +34,11 @@ struct SideBar: View {
     /// The width the column had when the edge was picked up.
     @State private var grabbed: CGFloat?
     @State private var onEdge = false
-    @State private var groupFrames: [UUID: CGRect] = [:]
+    /// A row or a heading picked up in the column, and where each one is.
+    @State private var carrying: Carrying?
+    @State private var itemFrames: [UUID: CGRect] = [:]
+    /// The lifted copy's own pill, apart from the one the live row wears.
+    @Namespace private var lifted
     @State private var expandedBookmarks: Set<Bookmark.ID> = []
 
     /// A pin, picked up out of the grid — a separate state from the loose
@@ -80,6 +84,14 @@ struct SideBar: View {
                 // row to put them at in this mode.
                 HStack(spacing: 0) {
                     Color.clear.frame(width: Metrics.sideLights)
+                    // Settings › Tabs › Hide the sidebar until the pointer
+                    // reaches the edge, and ⌘S: beside the lights, where
+                    // Safari and Arc keep theirs.
+                    Door(icon: prefs.sidePosition == .right ? "sidebar.right" : "sidebar.left",
+                         help: window.folded ? "Keep the sidebar open   ⌘S" : "Hide the sidebar   ⌘S") {
+                        window.toggleFold()
+                    }
+                    .padding(.trailing, 4)
                     Helm(window: window)
                     Spacer(minLength: 0)
                 }
@@ -448,52 +460,141 @@ struct SideBar: View {
 
     // MARK: - the rows
 
+    /// Headings and rows as one list, so a tab carried from one group into
+    /// another stays the same view the whole way — two lists, and SwiftUI
+    /// made it anew in the second, ending the drag under the hand.
+    private var sideItems: [SideItem] {
+        guard prefs.usesTabGroups else { return looseTabs.map(SideItem.row) }
+        var items: [SideItem] = []
+        let held: UUID? = carrying?.id
+        for group in window.tabGroups {
+            items.append(.heading(group))
+            // A group being carried folds its tabs under its heading.
+            if held == group.id { continue }
+            let members = window.tabs(in: group.id)
+            // Folded, it still shows the tab on screen, and the one in hand.
+            items += (group.collapsed ? members.filter { $0.id == window.activeID || $0.id == held } : members)
+                .map(SideItem.row)
+        }
+        items += window.tabs(in: nil).map(SideItem.row)
+        return items
+    }
+
     private var loose: some View {
         VStack(spacing: SideBar.gap) {
-            if prefs.usesTabGroups {
-                ForEach(window.tabGroups) { group in
-                    GroupHeading(window: window, group: group, dragSpace: "rows")
-                    tabRows(window.visibleTabs(in: group), group: group.id)
-                }
-                tabRows(window.tabs(in: nil), group: nil)
-            } else {
-                tabRows(looseTabs, group: nil)
+            ForEach(sideItems) { item in
+                item.view(window: window, prefs: prefs, pill: pill)
+                    // Its place, kept open while it is in the hand.
+                    .opacity(carrying?.id == item.id ? 0 : 1)
+                    .background {
+                        GeometryReader { geometry in
+                            Color.clear.preference(key: SideItemFrames.self,
+                                                   value: [item.id: geometry.frame(in: .named("rows"))])
+                        }
+                    }
+                    .gesture(carry(item), including: window.visiblePair == nil ? .all : .subviews)
             }
         }
         .coordinateSpace(name: "rows")
-        .onPreferenceChange(GroupDropFrames.self) { groupFrames = $0 }
+        .onPreferenceChange(SideItemFrames.self) { itemFrames = $0 }
+        .overlay(alignment: .topLeading) { liftedItem }
     }
 
-    private func tabRows(_ tabs: [Tab], group: UUID?) -> some View {
-            ForEach(Array(tabs.enumerated()), id: \.element.id) { index, tab in
-                let step = SideBar.row + SideBar.gap
-                SideRow(
-                    window: window,
-                    prefs: prefs,
-                    tab: tab,
-                    live: tab.id == window.activeID,
-                    pill: pill,
-                    close: { window.close(tab) }
-                )
-                // Positions here are among the loose rows; the pinned block
-                // sits in front of them in the real list.
-                .modifier(Carried(
-                    index: index,
-                    count: tabs.count,
-                    step: step,
-                    vertical: true,
-                    space: "rows",
-                    move: {
-                        if prefs.usesTabGroups { window.move(tab, within: group, to: $0) }
-                        else { window.move(tab, to: $0 + window.pinnedCount) }
-                    },
-                    tab: tab,
-                    window: window,
-                    groupAt: { point in groupFrames.first { $0.value.contains(point) }?.key }
-                ))
-                .modifier(SplitSource(browser: window, tab: tab))
-                .id(tab.id)
+    /// The row or heading in the hand: a copy, over the list, exactly under
+    /// the pointer, while the list makes room for it underneath.
+    @ViewBuilder
+    private var liftedItem: some View {
+        if let carrying, let item = carrying.item {
+            item.view(window: window, prefs: prefs, pill: lifted)
+                .frame(width: carrying.width)
+                .offset(y: carrying.top + carrying.travel)
+                .shadow(color: .black.opacity(0.16), radius: 12, y: 4)
+                .allowsHitTesting(false)
+                .transition(.identity)
+        }
+    }
+
+    private func carry(_ item: SideItem) -> some Gesture {
+        DragGesture(minimumDistance: 5, coordinateSpace: .named("rows"))
+            .onChanged { value in
+                if carrying == nil {
+                    guard let frame = itemFrames[item.id] else { return }
+                    carrying = Carrying(item: item, top: frame.minY, width: frame.width, height: frame.height)
+                }
+                carrying?.travel = value.translation.height
+                carrying?.across = value.translation.width
+                guard let carrying else { return }
+                let centre = carrying.top + carrying.travel + carrying.height / 2
+                withAnimation(Motion.settle) {
+                    switch item {
+                    case .row(let tab): place(tab, at: centre)
+                    case .heading(let group): place(group.id, at: centre)
+                    }
+                }
             }
+            .onEnded { value in
+                let across = value.translation.width
+                withAnimation(Motion.settle) { carrying = nil }
+                guard case .row(let tab) = item, abs(across) > 40 else { return }
+                // Off the column's side: into another window, or a window
+                // of its own, as the strip's tabs go.
+                let mouse = NSEvent.mouseLocation
+                if let target = browser.window(at: mouse), target !== window {
+                    window.move(tab, to: target, at: target.insertionIndex(at: mouse))
+                    browser.host(of: target)?.makeKeyAndOrderFront(nil)
+                } else if let host = browser.host(of: window), !host.frame.contains(mouse) {
+                    window.detach(tab, at: mouse)
+                }
+            }
+    }
+
+    /// Where a carried tab's middle has reached: before the first thing in
+    /// the list whose middle is still below it. Before a tab, into that
+    /// tab's section. Before a heading, onto the end of the section above
+    /// it — or, above the first heading, the top of the first group. Below
+    /// everything, the end of the tabs in no group.
+    private func place(_ tab: Tab, at centre: CGFloat) {
+        let items = sideItems.filter { $0.id != tab.id }
+        let next = items.firstIndex { (itemFrames[$0.id]?.midY ?? .infinity) > centre }
+        var group: UUID?
+        var before: Tab?
+        if let next {
+            switch items[next] {
+            case .row(let other):
+                group = other.groupID
+                before = other
+            case .heading(let heading):
+                let above = window.tabGroups.firstIndex { $0.id == heading.id }.flatMap { $0 > 0 ? window.tabGroups[$0 - 1] : nil }
+                group = above?.id ?? heading.id
+                before = above == nil ? window.tabs(in: heading.id).first { $0.id != tab.id } : nil
+            }
+        }
+        if !prefs.usesTabGroups { group = tab.groupID }
+        // Already there: nothing to move.
+        let section = window.tabs(in: group)
+        if tab.groupID == group, let index = section.firstIndex(where: { $0.id == tab.id }) {
+            let following = section.indices.contains(index + 1) ? section[index + 1] : nil
+            if following?.id == before?.id { return }
+        }
+        window.place(tab, inGroup: group, before: before)
+        // A folded group it lands in opens, so it is there to be seen.
+        if let group, let at = window.tabGroups.firstIndex(where: { $0.id == group }), window.tabGroups[at].collapsed {
+            window.toggleTabGroup(group)
+        }
+    }
+
+    /// Where a carried heading's middle has reached: past the middle of
+    /// each other group, heading and tabs together, it goes below that one.
+    private func place(_ id: UUID, at centre: CGFloat) {
+        let others = window.tabGroups.filter { $0.id != id }
+        let target = others.filter { group in
+            let parts = [group.id] + window.visibleTabs(in: group).map(\.id)
+            let frames = parts.compactMap { itemFrames[$0] }
+            guard let first = frames.first else { return false }
+            return frames.dropFirst().reduce(first) { $0.union($1) }.midY < centre
+        }.count
+        guard window.tabGroups.firstIndex(where: { $0.id == id }) != target else { return }
+        window.moveTabGroup(id, to: target)
     }
 
     /// The loose tabs and the row that makes another, which scroll as one.
@@ -923,5 +1024,49 @@ extension EnvironmentValues {
     var columnSettled: Bool {
         get { self[ColumnSettledKey.self] }
         set { self[ColumnSettledKey.self] = newValue }
+    }
+}
+
+/// One line of the column's list: a group's heading, or a tab.
+private enum SideItem: Identifiable {
+    case heading(TabGroup)
+    case row(Tab)
+
+    var id: UUID {
+        switch self {
+        case .heading(let group): group.id
+        case .row(let tab): tab.id
+        }
+    }
+
+    @MainActor @ViewBuilder
+    func view(window: WindowModel, prefs: Preferences, pill: Namespace.ID) -> some View {
+        switch self {
+        case .heading(let group):
+            GroupHeading(window: window, group: group, carried: true)
+        case .row(let tab):
+            SideRow(window: window, prefs: prefs, tab: tab, live: tab.id == window.activeID,
+                    pill: pill, close: { window.close(tab) })
+                .modifier(SplitSource(browser: window, tab: tab))
+        }
+    }
+}
+
+/// What the column's drag has in hand, and how far it has come.
+private struct Carrying {
+    let item: SideItem?
+    let top: CGFloat
+    let width: CGFloat
+    let height: CGFloat
+    var travel: CGFloat = 0
+    var across: CGFloat = 0
+    var id: UUID? { item?.id }
+}
+
+/// Where each heading and row of the column is, in the list's own space.
+private struct SideItemFrames: PreferenceKey {
+    static var defaultValue: [UUID: CGRect] = [:]
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
     }
 }

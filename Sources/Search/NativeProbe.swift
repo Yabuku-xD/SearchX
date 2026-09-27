@@ -223,12 +223,18 @@ enum NativeProbe {
             }
             let dx = request["dx"] as? Double ?? 0, dy = request["dy"] as? Double ?? 0
             let steps = max(1, request["steps"] as? Int ?? 20)
+            // A hand's pace, one move every 8 ms: posted all at once they
+            // arrived as one lump, which no mouse sends.
             post(.leftMouseDown, start)
             for n in 1...steps {
                 let t = Double(n) / Double(steps)
-                post(.leftMouseDragged, NSPoint(x: start.x + dx * t, y: start.y - dy * t))
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.008 * Double(n)) {
+                    post(.leftMouseDragged, NSPoint(x: start.x + dx * t, y: start.y - dy * t))
+                }
             }
-            post(.leftMouseUp, NSPoint(x: start.x + dx, y: start.y - dy))
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.008 * Double(steps + 2)) {
+                post(.leftMouseUp, NSPoint(x: start.x + dx, y: start.y - dy))
+            }
             return ["dragged": [dx, dy]]
         case "fullscreen":
             guard let window else { return ["error": "no window"] }
