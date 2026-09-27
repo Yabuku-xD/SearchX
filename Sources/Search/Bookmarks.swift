@@ -748,11 +748,13 @@ struct BookmarkOutline: View {
 /// when ⌘D opened it, the list otherwise.
 struct BookmarkDoor: View {
     @ObservedObject var browser: Browser
+    /// The window the button is in: its tab, not the one in front.
+    @ObservedObject var window: WindowModel
     let arrowEdge: Edge
 
     var body: some View {
         Group {
-            if let tab = browser.key?.active {
+            if let tab = window.active {
                 Kept(browser: browser, bookmarks: browser.bookmarks, tab: tab)
             } else {
                 BookmarkDoor.door(browser, kept: false)

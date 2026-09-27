@@ -18,6 +18,28 @@ enum NativeProbe {
         }
         let window = browser.keyHost
         switch request["action"] as? String ?? "nodes" {
+        case "hitches":
+            // The main thread against the display: every tick is a frame
+            // this process could have drawn in, or handed a page's on.
+            // "start" begins counting, anything else reads and stops.
+            if request["start"] as? Bool == true {
+                Hitches.shared.start(on: window?.screen ?? NSScreen.main)
+                return ["started": true]
+            }
+            return Hitches.shared.stop()
+        case "live":
+            // Pages still alive anywhere: a tab closed for good lets its go.
+            let pages = Web.pages.allObjects
+            return ["pages": pages.count, "inWindow": pages.filter { $0.window != nil }.count,
+                    "tabs": browser.allTabs.count, "built": browser.allTabs.filter { $0.built != nil }.count]
+        case "scripts":
+            // What every page and frame of the tab on screen is given.
+            guard let web = browser.key?.active?.built else { return ["error": "no page"] }
+            return ["scripts": web.configuration.userContentController.userScripts.map { script in
+                ["bytes": script.source.utf8.count, "mainOnly": script.isForMainFrameOnly,
+                 "start": script.injectionTime == .atDocumentStart,
+                 "head": String(script.source.prefix(90)).replacingOccurrences(of: "\n", with: " ")] as [String: Any]
+            }]
         case "favicon":
             if request["evict"] as? Bool == true { Favicons.shared.evictForProbe() }
             guard let host = request["host"] as? String ?? browser.key?.active?.address?.host() else {

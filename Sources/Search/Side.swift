@@ -630,7 +630,7 @@ struct SideBar: View {
             if browser.prefs.usesSpaces { SpaceDot(window: window) }
             ExtensionSlot(edge: .trailing, showMenu: prefs.extensionButton)
             if prefs.bookmarkButton {
-                BookmarkDoor(browser: browser, arrowEdge: .trailing)
+                BookmarkDoor(browser: browser, window: window, arrowEdge: .trailing)
             }
             if prefs.dialButton {
                 Door(icon: "square.grid.2x2", help: "Speed Dial") { window.showDial() }

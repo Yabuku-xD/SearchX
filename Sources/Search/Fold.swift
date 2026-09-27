@@ -113,6 +113,9 @@ struct Fold: View {
     /// good comes out. Long enough to cross the edge, short enough not to be
     /// waited for.
     private static let dwell: TimeInterval = 0.15
+    /// How far past the edge the folded column or row waits: its own
+    /// ground reaches 40 points beyond it, and its shade a little more.
+    private static let parked: CGFloat = 64
 
     var body: some View {
         ZStack(alignment: onRight ? .topTrailing : .topLeading) {
@@ -128,21 +131,26 @@ struct Fold: View {
                     .frame(height: Fold.top)
                     .frame(maxWidth: .infinity)
             }
-            if folding, !prefs.sidebar, window.peeking {
+            if folding, !prefs.sidebar {
                 // The row has no ground of its own: in the window it lies on
                 // the window's. Out over the page it brings that ground along,
                 // as the column does, or the page showed through between the
                 // tabs, and the shadow fell from every title and icon rather
                 // than from the row's edge.
+                //
+                // Kept, folded or not, just above the window's top edge (see
+                // the column below for why).
                 TabBar(window: window)
                     .background(FloatingChromeGround(prefs: prefs))
                     .background(alignment: .bottom) { FoldShade(edge: .bottom) }
                     .environment(\.chromeBacking, .provided)
-                    .transition(.move(edge: .top))
+                    .offset(y: window.peeking ? 0 : -(prefs.topBarHeight + Fold.parked))
+                    .allowsHitTesting(window.peeking)
+                    .accessibilityHidden(!window.peeking)
             }
             ZStack(alignment: onRight ? .trailing : .leading) {
                 Color.clear.frame(width: 0)
-                if folding, prefs.sidebar, window.peeking {
+                if folding, prefs.sidebar {
                     // The spring carries the column a few points past the
                     // window edge before it settles. Beside the page the
                     // window fills that; out over the page it showed the
@@ -155,7 +163,15 @@ struct Fold: View {
                             FoldShade(edge: onRight ? .leading : .trailing)
                         }
                         .environment(\.chromeBacking, .provided)
-                        .transition(.move(edge: sideEdge))
+                        // Kept, folded or not, just past the window's edge,
+                        // and slid out and back on the column's spring. Made
+                        // afresh each time it came out, every row, heading
+                        // and pin was built and measured again in the frame
+                        // the slide began: 25–33 ms on the main thread, the
+                        // page's frames with it. Now only its place changes.
+                        .offset(x: window.peeking ? 0 : (onRight ? 1 : -1) * (prefs.sideWidth + Fold.parked))
+                        .allowsHitTesting(window.peeking)
+                        .accessibilityHidden(!window.peeking)
                 }
             }
             .frame(maxHeight: .infinity)

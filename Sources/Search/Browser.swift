@@ -889,12 +889,17 @@ final class Browser: NSObject, ObservableObject {
     /// The few settings that something else has to be told about. The rest are
     /// read where they are used.
     private var commandWindowBag = Set<AnyCancellable>()
+    /// The menu bar's own signal (see MenuState).
+    let menu = MenuState()
     private var commandTabBag = Set<AnyCancellable>()
 
     private func followCommands(in window: WindowModel?) {
         commandWindowBag.removeAll()
         commandTabBag.removeAll()
-        guard let window else { objectWillChange.send(); return }
+        // Another window in front: rare, and whatever reads the one in
+        // front is told.
+        objectWillChange.send()
+        guard let window else { return }
         Publishers.MergeMany([
             window.$folded.map { _ in () }.eraseToAnyPublisher(),
             window.$finding.map { _ in () }.eraseToAnyPublisher(),
@@ -905,7 +910,7 @@ final class Browser: NSObject, ObservableObject {
             window.$pendingSplit.map { _ in () }.eraseToAnyPublisher(),
         ])
         .receive(on: DispatchQueue.main)
-        .sink { [weak self] in self?.objectWillChange.send() }
+        .sink { [weak self] in self?.menu.changed() }
         .store(in: &commandWindowBag)
         Publishers.Merge(
             window.$activeID.map { _ in () }, window.$tabs.map { _ in () }
@@ -917,7 +922,7 @@ final class Browser: NSObject, ObservableObject {
 
     private func followCommandTab(_ tab: Tab?) {
         commandTabBag.removeAll()
-        objectWillChange.send()
+        menu.changed()
         guard let tab else { return }
         // Menu validation depends on page state as well as window selection.
         // Watching specific publishers avoids the profile/window redraw cycle.
@@ -929,7 +934,7 @@ final class Browser: NSObject, ObservableObject {
             tab.$canGoForward.map { _ in () }.eraseToAnyPublisher(),
         ])
         .receive(on: DispatchQueue.main)
-        .sink { [weak self] in self?.objectWillChange.send() }
+        .sink { [weak self] in self?.menu.changed() }
         .store(in: &commandTabBag)
     }
 
@@ -1730,6 +1735,13 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         guard let tab = tab(for: webView), let url = tab.address else { return }
         tab.uncover()
         guard !tab.onDial else { return }
+        // The store's "Add to SearchX" only on the store, and only where
+        // SearchX can add extensions: before macOS 15.4 pressing it did
+        // nothing at all. Given to that page alone rather than parsed by
+        // every page there is.
+        if #available(macOS 15.4, *), url.host()?.lowercased() == "chromewebstore.google.com" {
+            webView.evaluateInSearch(StoreRelay.script)
+        }
         tellStore(tab)
         // A page that arrived after a password went out: did the sign-in take?
         tab.settleSignIn()
@@ -1931,5 +1943,26 @@ extension Browser: WKDownloadDelegate {
             n += 1
         }
         return candidate
+    }
+}
+
+/// The menu bar's say on the window and tab in front: which items are on,
+/// which are greyed. Told on its own, once changes have paused for a moment,
+/// so a run of tab switches rebuilds the menu bar once, after them — and
+/// redraws nothing else, where borrowing the browser's own signal redrew
+/// every view that watches the browser, in every window, on every switch.
+/// Keyboard shortcuts don't wait on it: they are taken before the menus.
+@MainActor
+final class MenuState: ObservableObject {
+    private var pending: DispatchWorkItem?
+
+    func changed() {
+        pending?.cancel()
+        let tell = DispatchWorkItem { [weak self] in
+            self?.pending = nil
+            self?.objectWillChange.send()
+        }
+        pending = tell
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: tell)
     }
 }

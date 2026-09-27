@@ -138,8 +138,14 @@ class Run:
 
     def launch(self):
         self.log = (self.directory / "app.log").open("ab")
+        # Headless unless SEARCH_VISIBLE is set: the window is see-through,
+        # ignores the pointer and sits off every screen (SEARCH_PARK), so a
+        # run never lands on the screen of whoever is working at the Mac.
+        env = {**os.environ, "SEARCH_PROBE": self.args.world}
+        if not os.environ.get("SEARCH_VISIBLE"):
+            env["SEARCH_PARK"] = "1"
         self.process = subprocess.Popen([str(self.app / "Contents/MacOS/Search")],
-            env={**os.environ, "SEARCH_PROBE": self.args.world}, stdout=self.log, stderr=self.log,
+            env=env, stdout=self.log, stderr=self.log,
             start_new_session=True)
         self.report["pid"] = self.process.pid
         deadline = time.monotonic() + 30
@@ -150,7 +156,8 @@ class Run:
                 with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
                     connection.connect(self.socket_path)
                 self.ask("tabs")
-                subprocess.run(["open", str(self.app)], check=True)
+                if os.environ.get("SEARCH_VISIBLE"):
+                    subprocess.run(["open", str(self.app)], check=True)
                 time.sleep(.5)
                 return
             except (OSError, ValueError, SystemExit):

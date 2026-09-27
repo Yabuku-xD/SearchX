@@ -1511,6 +1511,8 @@ final class Bench {
             if let on = request["hides"] as? Bool { browser.prefs.sideHides = on }
             if let on = request["folded"] as? Bool { browser.key?.folded = on }
             if let on = request["peek"] as? Bool { browser.key?.peeking = on }
+            // As the pointer at the edge does it: on the column's spring.
+            if let on = request["slide"] as? Bool { browser.key?.peek(on) }
             // A peek at a link (Peek.swift): its two buttons.
             if let what = request["peeklink"] as? String {
                 if what == "keep" { browser.key?.keepPeek() } else { browser.key?.closePeek() }

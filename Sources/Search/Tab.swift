@@ -691,9 +691,6 @@ final class Tab: ObservableObject, Identifiable {
             WKUserScript(source: ScrollRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)
         )
         controller.addUserScript(
-            WKUserScript(source: Veiling.picker, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Web.world)
-        )
-        controller.addUserScript(
             WKUserScript(source: FormRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)
         )
         if AutoScroll.on {
@@ -709,14 +706,6 @@ final class Tab: ObservableObject, Identifiable {
         controller.addUserScript(
             WKUserScript(source: ImageRelay.watch, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
         )
-        // The store's "Add to Search" only where Search can add extensions.
-        // Before macOS 15.4 it was drawn all the same, and pressing it did
-        // nothing at all; Settings › Extensions says what they need instead.
-        if #available(macOS 15.4, *) {
-            controller.addUserScript(
-                WKUserScript(source: StoreRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)
-            )
-        }
         // Only while Settings says so: off, pages get nothing at all.
         if HoveredLink.on {
             controller.addUserScript(WKUserScript(
@@ -785,7 +774,10 @@ final class Tab: ObservableObject, Identifiable {
         if !calls.isEmpty { arm(hiding: veils) }
     }
 
-    func startPicking() { web.evaluateInSearch("window.__officeVeil && window.__officeVeil.on()") }
+    /// The pointing mode, handed to the page only when it is asked for:
+    /// parsed on every page load, it was 8 KB nobody used on most of them.
+    /// Every use brings it along; a page that has it already keeps its own.
+    func startPicking() { web.evaluateInSearch(Veiling.picker + ";window.__officeVeil && window.__officeVeil.on()") }
     func stopPicking() { web.evaluateInSearch("window.__officeVeil && window.__officeVeil.off()") }
 
     /// A scroll reports this once a frame; only a real change is worth the redraw.
@@ -879,7 +871,7 @@ final class Tab: ObservableObject, Identifiable {
     /// Show one hidden thing while the pointer rests on its row in the list.
     func peek(_ selector: String, keeping css: String) {
         web.evaluateInSearch(
-            "window.__officeVeil && window.__officeVeil.peek(`\(escape(css))`, `\(escape(selector))`)"
+            Veiling.picker + ";window.__officeVeil && window.__officeVeil.peek(`\(escape(css))`, `\(escape(selector))`)"
         )
     }
 

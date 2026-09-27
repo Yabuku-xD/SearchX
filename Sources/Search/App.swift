@@ -26,12 +26,16 @@ struct SearchApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1180, height: 780)
-        .commands { SearchCommands(browser: browser) }
+        .commands { SearchCommands(browser: browser, menu: browser.menu) }
     }
 }
 
 private struct SearchCommands: Commands {
     @ObservedObject var browser: Browser
+    /// What the menus show about the window and tab in front (see
+    /// MenuState): told apart from the browser, so a tab switch rebuilds the
+    /// menu bar and not every view that watches the browser too.
+    @ObservedObject var menu: MenuState
 
     var body: some Commands {
             CommandGroup(replacing: .newItem) {
@@ -564,7 +568,7 @@ struct ContentView: View {
                 keepAsking(offer)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            StoreOffer(browser: browser)
+            StoreOffer(window: window)
             if browser.veiling {
                 hint("Click anything to hide it   ⌘Z undo   esc done")
                     .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -911,6 +915,14 @@ struct ContentView: View {
         if let frame = window.frameRequest {
             window.frameRequest = nil
             host.setFrame(frame, display: false)
+        }
+        // A measuring run that must not show: see-through, out of the way
+        // of the pointer, and off every screen, from before its first frame.
+        // Its pages are told they are seen (see NativeProbe "performance").
+        if Store.testing, ProcessInfo.processInfo.environment["SEARCH_PARK"] != nil {
+            host.alphaValue = 0
+            host.ignoresMouseEvents = true
+            host.setFrameOrigin(NSPoint(x: -30000, y: -30000))
         }
         // Light or dark is the app's to say (Settings › Appearance); the
         // window only has to be the ground colour that goes with it.

@@ -197,10 +197,11 @@ struct ExtensionsPage: View {
 /// On an extension's page in the Chrome Web Store, the offer to add it —
 /// where the store's own button only says "Switch to Chrome".
 struct StoreOffer: View {
-    @ObservedObject var browser: Browser
+    /// The window the offer is in: its tab, not the one in front.
+    @ObservedObject var window: WindowModel
 
     var body: some View {
-        if #available(macOS 15.4, *), let tab = browser.key?.active {
+        if #available(macOS 15.4, *), let tab = window.active {
             Watch(tab: tab, extensions: .shared)
         }
     }

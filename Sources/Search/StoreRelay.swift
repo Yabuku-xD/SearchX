@@ -30,7 +30,8 @@ final class StoreRelay: NSObject, WKScriptMessageHandler {
         }
     }
 
-    /// Main frame, every page, returning at once anywhere but the store. The
+    /// The store's pages only, handed over once each has loaded (see
+    /// Browser's didFinish), and returning at once anywhere else. The
     /// store's markup is generated and its class names change between
     /// releases, so nothing here leans on them: the store's own button is the
     /// disabled one that names Chrome, and the banner is the small block

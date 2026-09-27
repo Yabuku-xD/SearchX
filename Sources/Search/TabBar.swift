@@ -131,7 +131,7 @@ struct TabBar: View {
                             Helm(window: window).padding(.trailing, 8)
                         }
                         if browser.prefs.bookmarkButton {
-                            BookmarkDoor(browser: browser, arrowEdge: .bottom)
+                            BookmarkDoor(browser: browser, window: window, arrowEdge: .bottom)
                         }
                         if browser.prefs.dialButton {
                             Door(icon: "square.grid.2x2", help: "Speed Dial") { window.showDial() }

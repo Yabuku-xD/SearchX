@@ -1,5 +1,6 @@
 # Build output. build.sh and SwiftPM regenerate all of this.
 .build/
+.build-probe/
 build/
 .swiftpm/
 *.dSYM
