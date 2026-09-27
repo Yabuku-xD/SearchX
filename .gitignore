@@ -1,0 +1,34 @@
+# Build output. build.sh and SwiftPM regenerate all of this.
+.build/
+build/
+.swiftpm/
+*.dSYM
+*.xcuserstate
+__pycache__/
+
+# Test evidence and scratch folders the local checks write.
+.local-resolution/
+.local-*/
+.cleanup/
+*.trace
+
+# Personal and editor files.
+.DS_Store
+TASKS.md
+.vscode/
+.idea/
+*.swp
+*~
+
+# Leftovers of a patch that did not apply cleanly.
+*.orig
+*.rej
+
+# Local secrets for notarising or publishing. Never commit them.
+.env
+.env.*
+
+# Signing material tied to one Apple Developer account. Never commit it.
+*.provisionprofile
+*.p12
+*.mobileprovision

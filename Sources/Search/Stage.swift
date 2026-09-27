@@ -1,0 +1,644 @@
+import SwiftUI
+import WebKit
+
+/// Everything below the strip: the page, the line that says it is coming, and
+/// the sentence that says it never did.
+///
+/// The tab is watched from here rather than from the window. A tab is a class,
+/// so going from blank to loaded changes nothing about the value the window
+/// hands down — SwiftUI sees the same reference, re-runs nothing, and the page
+/// arrives in WebKit without ever being put on screen. Watching it here is
+/// what turns that into a redraw.
+struct Page: View {
+    @ObservedObject var tab: Tab
+    /// The profile, for the picture behind a blank tab.
+    var browser: Browser?
+    /// The column or strip out over this page, for the blur behind it.
+    var overlay = PageOverlay()
+
+    var body: some View {
+        ZStack {
+            // A tab put down with ⌘W has no view, and asking for one here
+            // would build an empty one a frame before the stage moves on.
+            //
+            // Nor is a floating page asked for. Handing the same view over
+            // before and after the float changes nothing SwiftUI can see, so
+            // the stage was never told to take it back when it landed, and
+            // the tab stayed empty. Nothing, then the page, is a change.
+            WebStage(page: tab.isBlank || tab.onDial || tab.asleep || tab.floating ? nil : tab.web, overlay: overlay)
+
+            // The dial in the window this tab is in, not whichever window is
+            // key: the tab knows the row it is in.
+            if let window = tab.owner, tab.onDial {
+                SpeedDialPage(browser: window, dial: window.profile.speedDial)
+            }
+
+            // A picture behind a blank tab, if someone put one there.
+            if browser != nil { WallpaperView(tab: tab) }
+
+            if let cover = tab.cover {
+                // The page as it was left, while it is rebuilt underneath —
+                // anchored where the page itself starts, and never in the
+                // way of a click meant for the page.
+                Image(nsImage: cover)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .clipped()
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+
+            if tab.floating {
+                // The tab is not empty, its page is simply elsewhere. Saying so
+                // is kinder than a white rectangle.
+                Text("This page is playing in the floating window.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Palette.muted)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Palette.ground)
+                    .transition(.opacity)
+            }
+
+            if let failure = tab.failure {
+                Trouble(message: failure) { tab.reload() }
+                    .transition(.opacity)
+            }
+
+            Drops(pulling: tab.pulling)
+        }
+        .animation(Motion.quick, value: tab.failure)
+        .animation(Motion.quick, value: tab.floating)
+        .animation(Motion.easeOut(0.2), value: tab.cover == nil)
+    }
+}
+
+/// The swipe over the page: the disc a swipe brings in, or the list it becomes
+/// once it is held. Watched from the tab’s swipe rather than from the tab, so a
+/// frame of it redraws this and nothing else (see Pulling).
+private struct Drops: View {
+    @ObservedObject var pulling: Pulling
+
+    var body: some View {
+        ZStack {
+            if let pull = pulling.pull, pull.stops != nil {
+                HistoryList(pull: pull)
+                    .id(pull.back)
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .scale(scale: 0.92, anchor: pull.back ? .leading : .trailing)),
+                        removal: .opacity.combined(with: .scale(scale: 0.96, anchor: pull.back ? .leading : .trailing))
+                    ))
+            } else if let pull = pulling.pull {
+                Disc(pull: pull)
+                    // A disc for each edge, never one that changes edges: a
+                    // view whose alignment flips is a view that glides the
+                    // whole way across the window to get there.
+                    .id(pull.back)
+                    // A short fade and a little growth, both ways. Anything
+                    // longer is still arriving when a quick flick has already
+                    // let go. Grown from the edge it comes in at: the disc is
+                    // in a frame as wide as the window, and grown from that
+                    // frame’s middle it came in from the middle, sliding out
+                    // to its edge — from the right, going back.
+                    .transition(.opacity.combined(with: .scale(scale: 0.85, anchor: pull.back ? .leading : .trailing)))
+            }
+        }
+        .allowsHitTesting(false)
+        .animation(Motion.easeOut(0.16), value: pulling.pull == nil)
+    }
+}
+
+/// The disc a sideways swipe brings in from the edge.
+///
+/// White, with a hairline, like everything else that floats over a page. A
+/// line of ink winds round it as the fingers go and closes at the point where
+/// letting go would mean it. Turn back and it unwinds. Let go while it is
+/// closed and the disc leaves with the page.
+///
+/// It follows the fingers directly, with no spring between: a spring reads
+/// as lag on a quick flick, and a quick flick is how most people swipe.
+private struct Disc: View {
+    let pull: Pull
+
+    var body: some View {
+        // The fingers can travel as far as they like; the disc stops short.
+        let reach = 150 * (1 - exp(-pull.travel / 110))
+        let grown = min(1, pull.travel / 110)
+        let scale: CGFloat = pull.going ? 1.08 : 0.86 + 0.14 * grown
+
+        ZStack {
+            Circle()
+                .fill(Palette.ground)
+            Circle()
+                .strokeBorder(Palette.hairline, lineWidth: 1)
+            // How far there is to go, wound round the edge, closed when it
+            // is armed.
+            Circle()
+                .trim(from: 0, to: grown)
+                .stroke(Palette.ink, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .padding(0.75)
+            Image(systemName: pull.back ? "arrow.left" : "arrow.right")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Palette.ink.opacity(0.4 + 0.6 * grown))
+        }
+        .frame(width: 52, height: 52)
+        .shadow(color: .black.opacity(0.12), radius: 16, y: 6)
+        .scaleEffect(scale)
+        .opacity(pull.going ? 0 : 1)
+        // Whole from the first point, a little way in from the edge, drawn
+        // further in as the fingers go — and a step further on its way out
+        // with the page.
+        .offset(x: (pull.back ? 1 : -1) * (10 + reach * 0.2 + (pull.going ? 12 : 0)))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: pull.back ? .leading : .trailing)
+        .allowsHitTesting(false)
+        .animation(Motion.easeOut(0.22), value: pull.going)
+    }
+}
+
+/// A swipe held once armed: the pages that way, in place of the disc, at
+/// the same edge. The one letting go would open is lit, and stays where the
+/// disc was while the list slides under it with the fingers (see
+/// PageView.climb). Let go, it fades where it is.
+private struct HistoryList: View {
+    let pull: Pull
+
+    /// A row and the gap under it.
+    private static let pitch: CGFloat = 30
+
+    var body: some View {
+        let reach = 150 * (1 - exp(-pull.travel / 110))
+        let count = pull.stops?.count ?? 0
+        // The lit row's middle on the disc's line, the list around it.
+        let slide = -(CGFloat(pull.picked) - CGFloat(count - 1) / 2) * HistoryList.pitch
+        VStack(spacing: 2) {
+            ForEach(Array((pull.stops ?? []).enumerated()), id: \.offset) { index, stop in
+                HStack(spacing: 8) {
+                    icon(stop.url)
+                        .frame(width: 14, height: 14)
+                    Text(stop.title.isEmpty ? (stop.url.host() ?? stop.url.absoluteString) : stop.title)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(index == pull.picked ? Palette.ink : Palette.ink.opacity(0.75))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 9)
+                .frame(height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Palette.ink.opacity(index == pull.picked ? 0.10 : 0))
+                )
+            }
+        }
+        .padding(5)
+        .frame(width: 240)
+        .background(Palette.ground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.hairline, lineWidth: 1))
+        .shadow(color: .black.opacity(0.16), radius: 18, y: 6)
+        .scaleEffect(pull.going ? 0.96 : 1)
+        .opacity(pull.going ? 0 : 1)
+        .offset(x: (pull.back ? 1 : -1) * (10 + reach * 0.2), y: slide)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: pull.back ? .leading : .trailing)
+        .allowsHitTesting(false)
+        .animation(nil, value: pull.picked)
+        .animation(Motion.easeOut(0.26), value: pull.going)
+    }
+
+    @ViewBuilder
+    private func icon(_ url: URL) -> some View {
+        if let host = url.host(), let image = Favicons.shared.cached(host) {
+            Image(nsImage: image).resizable().interpolation(.high)
+        } else {
+            Image(systemName: "globe")
+                .font(.system(size: 11))
+                .foregroundStyle(Palette.muted)
+        }
+    }
+}
+
+/// The one place a page is allowed to be. Tabs hand their web view over when
+/// they become the live one and get it back untouched when they don't — no
+/// reload, no lost scroll position, no forgotten form.
+struct WebStage: NSViewRepresentable {
+    let page: NSView?
+    var overlay = PageOverlay()
+
+    func makeNSView(context: Context) -> StageView { StageView() }
+
+    func updateNSView(_ view: StageView, context: Context) {
+        let animated = context.transaction.animation != nil && !context.transaction.disablesAnimations
+        view.show(page, overlay: overlay, animated: animated)
+    }
+}
+
+/// The folded column, or strip, brought out over the page (see Fold.swift):
+/// which edge it comes from, how far it reaches in, how strongly the page
+/// under it is blurred — nothing at 0 — and whether it is out.
+struct PageOverlay: Equatable {
+    enum Edge { case leading, trailing, top }
+
+    var edge = Edge.leading
+    var extent: CGFloat = 0
+    var radius: Double = 0
+    var out = false
+    /// The column's spring (Settings › Sidebar speed), which the blur under
+    /// it has to keep pace with; 0 is instant.
+    var response: Double = 0
+}
+
+final class StageView: NSView {
+    /// What this stage has been told to show, and the only thing it keeps.
+    ///
+    /// It used to track that *and* what it was holding, and reconcile the two.
+    /// One divergence between them — a page taken by the floating window, a tab
+    /// closed at the wrong moment, an update that arrived out of order — and
+    /// the stage would sit there holding nothing while believing it held
+    /// something. That is the white page, and it came back every time from a
+    /// different direction because the bookkeeping had many ways to slip.
+    ///
+    /// Now there is one fact and one rule: show `wanted`, and put that right on
+    /// every layout. Nothing to fall out of step with.
+    private weak var wanted: NSView?
+    /// The page, blurred, under the column out over it. A background filter
+    /// only reaches layers beside it, so it lives here beside the page rather
+    /// than in the column, and slides with the column on the column's own
+    /// spring (Motion.fold at Sidebar speed), started in the same transaction.
+    private var overlay = PageOverlay()
+    private var blur: BackgroundBlurView?
+    /// Sliding away with the column; kept until the slide is over.
+    private var blurLeaving = false
+    /// The slide under way. Its end is claimed once, by whichever comes
+    /// first: Core Animation's completion or a timer set to the spring's
+    /// length. The completion alone was not enough — AppKit can take a
+    /// layer's animations away (a change of appearance, of window, of tab)
+    /// without the completion finding its layer again, and the blur then sat
+    /// over the page where the column had been until the next reveal.
+    private var slide: UUID?
+
+    /// The Web Inspector each page off show had docked beside it. WebKit
+    /// docks it once, on show; a page coming back without it was laid out
+    /// short, beside an empty space.
+    private static let docks = NSMapTable<NSView, NSView>.weakToStrongObjects()
+
+    override func layout() {
+        super.layout()
+        settle()
+    }
+
+    func show(_ page: NSView?, overlay: PageOverlay = PageOverlay(), animated: Bool = false) {
+        // The inspector WebKit had docked beside the page leaving is
+        // kept aside for it, so a tab that comes back with its
+        // inspector still open gets it again.
+        if let leaving = wanted, leaving !== page, let dock = subviews.first(where: Self.isInspector) {
+            Self.docks.setObject(dock, forKey: leaving)
+            dock.removeFromSuperview()
+        }
+        wanted = page
+        let before = self.overlay
+        self.overlay = overlay
+        settle()
+        if before.out != overlay.out { slideBlur(animated: animated) }
+    }
+
+    private func settle() {
+        // A video filling the screen has its page lent to WebKit's own
+        // window, with a placeholder left here in its place. The chrome
+        // stepping aside lays this stage out again in that same moment, and
+        // taking the page back then left the screen black with the sound
+        // still playing. WebKit puts it back itself on the way out.
+        if let web = wanted as? WKWebView, web.fullscreenState != .notInFullscreen { return }
+
+        // Anything here that isn't wanted, out. Only ever what is actually
+        // ours: a page may be somewhere else on purpose. Except the Web
+        // Inspector docked beside the page: WebKit puts it here, next to the
+        // web view, and shrinks the page to make room. Taken out on the next
+        // resize, it left the page shrunk beside nothing (#91).
+        let docked = inspecting
+        for view in subviews where view !== wanted && view !== blur && !(docked && Self.isInspector(view)) {
+            view.removeFromSuperview()
+        }
+
+        guard let wanted, window != nil else { dropBlur(); return }
+        if wanted.superview !== self {
+            // A web view can have only one superview, so taking it back is how
+            // it is taken back.
+            wanted.removeFromSuperview()
+            // Seen — unless it has yet to draw, and would be seen white.
+            wanted.alphaValue = (wanted as? PageView)?.unpainted == true ? 0 : 1
+            addSubview(wanted)
+            if docked, let dock = Self.docks.object(forKey: wanted) {
+                addSubview(dock, positioned: .below, relativeTo: wanted)
+            }
+            Self.docks.removeObject(forKey: wanted)
+            // Full size, which WebKit, with its inspector back, cuts down to
+            // make room for it again at the stage's size now.
+            wanted.frame = bounds
+            // A web view coming back into a window sometimes keeps the last
+            // picture it had — which, after a while out of one, is nothing.
+            // Asking it to draw again is cheap and is what brings it back.
+            wanted.needsLayout = true
+            wanted.needsDisplay = true
+            wanted.layer?.setNeedsDisplay()
+        }
+        // With the inspector docked, WebKit lays the page and it out side by
+        // side as this view changes size; setting the page's frame here would
+        // cover the inspector.
+        if docked {
+            // Its inspector is back beside it, as WebKit last had it.
+            if let dock = Self.docks.object(forKey: wanted) {
+                addSubview(dock, positioned: .below, relativeTo: wanted)
+            }
+            Self.docks.removeObject(forKey: wanted)
+        }
+        if !(docked && subviews.contains(where: Self.isInspector)), wanted.frame != bounds {
+            wanted.frame = bounds
+        }
+        placeBlur(over: wanted)
+    }
+
+    /// How far past the window's edge the blur reaches, for the spring's
+    /// overshoot, as the column's own ground does.
+    private static let overshoot: CGFloat = 40
+
+    private func placeBlur(over page: NSView) {
+        // Made only while the column is out; kept past that only by a slide
+        // already carrying it away. A page arriving just after the column
+        // left — a new tab going to its first site — found "leaving" still
+        // set with nothing to carry, and got a fresh blur over it.
+        guard overlay.radius > 0, overlay.extent > 0, overlay.out || (blurLeaving && blur != nil) else { return dropBlur() }
+        let view = blur ?? BackgroundBlurView(frame: .zero)
+        blur = view
+        if view.superview !== self || subviews.last !== view {
+            addSubview(view, positioned: .above, relativeTo: page)
+        }
+        let reach = min(overlay.extent, overlay.edge == .top ? bounds.height : bounds.width) + Self.overshoot
+        let frame: NSRect
+        switch overlay.edge {
+        case .leading:
+            frame = NSRect(x: -Self.overshoot, y: 0, width: reach, height: bounds.height)
+        case .trailing:
+            frame = NSRect(x: bounds.width - reach + Self.overshoot, y: 0, width: reach, height: bounds.height)
+        case .top:
+            frame = NSRect(x: 0, y: isFlipped ? -Self.overshoot : bounds.height - reach + Self.overshoot,
+                           width: bounds.width, height: reach)
+        }
+        if view.frame != frame { view.frame = frame }
+        view.setRadius(overlay.radius)
+    }
+
+    private func dropBlur() {
+        guard let blur else { return }
+        slide = nil
+        blur.layer?.removeAnimation(forKey: "fold")
+        blur.removeFromSuperview()
+        self.blur = nil
+        blurLeaving = false
+    }
+
+    /// In or out with the column: the same distance on the same spring, so
+    /// the two move as one. At once when SwiftUI moved the column at once.
+    private func slideBlur(animated: Bool) {
+        let out = overlay.out
+        // Nothing on show, or nothing there to take away: nothing to slide.
+        guard let wanted, out || blur != nil else {
+            blurLeaving = false
+            dropBlur()
+            return
+        }
+        blurLeaving = !out && animated
+        placeBlur(over: wanted)
+        guard let view = blur, let layer = view.layer else { return }
+        let path = overlay.edge == .top ? "transform.translation.y" : "transform.translation.x"
+        let gone: CGFloat
+        switch overlay.edge {
+        case .leading: gone = -overlay.extent
+        case .trailing: gone = overlay.extent
+        case .top: gone = isFlipped ? -overlay.extent : overlay.extent
+        }
+        let running = layer.animation(forKey: "fold") != nil
+        let from = running ? (layer.presentation()?.value(forKeyPath: path) as? CGFloat ?? 0) : (out ? gone : 0)
+        let to: CGFloat = out ? 0 : gone
+        guard animated, let spring = Motion.foldSpring(path, response: overlay.response) else {
+            slide = nil
+            layer.removeAnimation(forKey: "fold")
+            layer.setValue(0, forKeyPath: path)
+            if !out { dropBlur() }
+            return
+        }
+        spring.fromValue = from
+        spring.toValue = to
+        spring.duration = spring.settlingDuration
+        // Where it ends is where the layer rests, so an animation taken away
+        // early leaves it there, off the page, rather than back over it.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.setValue(to, forKeyPath: path)
+        CATransaction.commit()
+        let ticket = UUID()
+        slide = ticket
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { [weak self] in
+            MainActor.assumeIsolated { self?.slid(ticket) }
+        }
+        layer.add(spring, forKey: "fold")
+        CATransaction.commit()
+        DispatchQueue.main.asyncAfter(deadline: .now() + spring.settlingDuration + 0.1) { [weak self] in
+            self?.slid(ticket)
+        }
+    }
+
+    /// The slide is over: a column gone leaves no blur behind, whatever the
+    /// slide believed when it began.
+    private func slid(_ ticket: UUID) {
+        guard slide == ticket else { return }
+        slide = nil
+        blur?.layer?.removeAnimation(forKey: "fold")
+        if !overlay.out { dropBlur() }
+    }
+
+    /// Whether the page on show has its Web Inspector up. WebKit answers only
+    /// through names outside its public framework, asked for before use (see
+    /// Inspector.swift).
+    private var inspecting: Bool {
+        guard let web = wanted as? WKWebView else { return false }
+        let get = NSSelectorFromString("_inspector")
+        guard web.responds(to: get), let inspector = web.perform(get)?.takeUnretainedValue() as? NSObject else { return false }
+        let visible = NSSelectorFromString("isVisible")
+        guard inspector.responds(to: visible) else { return false }
+        typealias Getter = @convention(c) (AnyObject, Selector) -> Bool
+        return unsafeBitCast(inspector.method(for: visible), to: Getter.self)(inspector, visible)
+    }
+
+    private static func isInspector(_ view: NSView) -> Bool {
+        String(describing: type(of: view)).hasPrefix("WKInspector")
+    }
+}
+
+/// What there is to say when the page never came. One line, and the only thing
+/// worth offering — another go.
+private struct Trouble: View {
+    let message: String
+    let retry: () -> Void
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Text(message.said)
+                .font(.system(size: 14))
+                .foregroundStyle(Palette.ink)
+            Button("Try again", action: retry)
+                .buttonStyle(.plain)
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.muted)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Palette.ground)
+    }
+}
+
+/// Hands back the NSWindow once there is one. SwiftUI has no opinion about
+/// traffic lights or title bars, and both need settling by hand here.
+struct WindowSetup: NSViewRepresentable {
+    let ready: (NSWindow) -> Void
+
+    func makeNSView(context: Context) -> NSView { Probe(ready: ready) }
+    func updateNSView(_ view: NSView, context: Context) {}
+
+    private final class Probe: NSView {
+        let ready: (NSWindow) -> Void
+
+        init(ready: @escaping (NSWindow) -> Void) {
+            self.ready = ready
+            super.init(frame: .zero)
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError() }
+
+        /// Here only to learn the window, never to be clicked: set behind or
+        /// over something that spans the whole window — Fold's layer does,
+        /// since its band runs along the top — a view that answered would
+        /// take every click meant for the page and the tabs.
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let window else { return }
+            // The window is still being put together at this point; anything
+            // set now gets overwritten a moment later.
+            DispatchQueue.main.async { self.ready(window) }
+        }
+    }
+}
+
+/// Drag to move, double-click to fill the screen. Lifted from the canvas app —
+/// with the title bar hidden the interface swallows the clicks a title bar
+/// would have handled, and they have to be put back.
+struct DragStrip: NSViewRepresentable {
+    /// How much of the leading edge belongs to the tabs. A representable is a
+    /// real view sitting under everything SwiftUI draws on top of it, and a
+    /// real view takes the click first — so the run the tabs occupy is refused
+    /// here and falls through to them.
+    var reserved: CGFloat = 0
+    /// How much of the top belongs to whatever is drawn there, measured from
+    /// the top edge. The column of tabs uses this the way the strip uses the
+    /// leading run.
+    var below: CGFloat = 0
+    /// The run at the trailing end that belongs to a button.
+    var trailing: CGFloat = 0
+
+    func makeNSView(context: Context) -> NSView { Strip() }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        (view as? Strip)?.reserved = reserved
+        (view as? Strip)?.below = below
+        (view as? Strip)?.trailing = trailing
+    }
+
+    private final class Strip: NSView {
+        var reserved: CGFloat = 0
+        var below: CGFloat = 0
+        var trailing: CGFloat = 0
+
+        private var pressed: NSEvent?
+        private var moved = false
+
+        /// The strip moves the window and answers the double-click itself.
+        /// Left to say yes, AppKit takes both on too in the title bar the
+        /// strip sits in, and a double-click answered twice — by AppKit on
+        /// the press, here on the release — ends where it started.
+        override var mouseDownCanMoveWindow: Bool { false }
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            let inside = convert(point, from: superview)
+            guard inside.x >= reserved, inside.x <= bounds.width - trailing else { return nil }
+            // AppKit measures up from the bottom; the reservation is from the top.
+            guard bounds.height - inside.y >= below else { return nil }
+            return super.hitTest(point)
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            pressed = event
+            moved = false
+        }
+
+        /// The window is not movable on its own (see dress in App.swift): a tab
+        /// picked up in the strip would carry the window off with it. Here
+        /// it is let go for the one drag, handed to the system's own window
+        /// drag so it snaps and tiles as any window does.
+        override func mouseDragged(with event: NSEvent) {
+            guard let window, let pressed, !moved else { return }
+            let dx = event.locationInWindow.x - pressed.locationInWindow.x
+            let dy = event.locationInWindow.y - pressed.locationInWindow.y
+            // A little slack, so a shaky click is still a click.
+            if abs(dx) < 3 && abs(dy) < 3 { return }
+            moved = true
+            window.isMovable = true
+            window.performDrag(with: pressed)
+            window.isMovable = false
+        }
+
+        /// A double-click does what a title bar's does. It answered every
+        /// click before — so a double-click filled the screen on the first
+        /// click and put the window back on the second, and looked like
+        /// nothing at all.
+        override func mouseUp(with event: NSEvent) {
+            guard let window, !moved, event.clickCount == 2 else { return }
+            // System Settings › Desktop & Dock: what double-clicking a title
+            // bar should do. Unset means the default, which fills the screen.
+            switch UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") {
+            case "Minimize": window.miniaturize(nil)
+            case "None": break
+            default: window.zoom(nil)
+            }
+        }
+    }
+}
+
+
+/// The three buttons as they look when the app is not the one you are using.
+///
+/// macOS does draw its own in that state, but in a light window they come out
+/// nearly white on white — Apple's own choice, and the reason a pale window
+/// looks like it has lost its controls while a dark one does not. So the
+/// system's are put away and these are drawn in exactly their place, read from
+/// the real buttons rather than guessed at.
+///
+/// It lives inside the title bar rather than in the window's content, because
+/// the title bar draws above everything the app puts on screen.
+final class RestingLights: NSView {
+    /// Set again each time the title bar is laid out — every change of
+    /// screen, key window or size — and redrawn only when they moved.
+    var spots: [CGRect] = [] {
+        didSet { if spots != oldValue { needsDisplay = true } }
+    }
+
+    override func draw(_ dirty: NSRect) {
+        Palette.NS.resting.setFill()
+        for spot in spots { NSBezierPath(ovalIn: spot).fill() }
+    }
+
+    /// Never in the way of a click: the real buttons are underneath, and they
+    /// come back the moment the app does.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}

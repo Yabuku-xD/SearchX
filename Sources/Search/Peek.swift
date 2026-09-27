@@ -1,0 +1,107 @@
+import SwiftUI
+
+// A peek at a link, Arc's way: shift-click it and its page opens in a panel
+// over the one you are reading, which stays where it was underneath. Escape,
+// a click beside the panel or its cross puts it away; its other buttons keep
+// it, as a tab beside this one or beside it in split view (Zen's Glance),
+// loaded as it is.
+//
+// Off unless asked for, in Settings › General: shift-click means other
+// things to some pages, and nobody who doesn't want this should meet it.
+//
+// The page is a tab of its own, only not in the row: keeping it is moving
+// it there, with nothing loaded twice.
+
+/// The peek over the page: the page dimmed around it, and the panel.
+struct PeekLayer: View {
+    @ObservedObject var window: WindowModel
+
+    var body: some View {
+        ZStack {
+            // The dimming only fades. Grown and shrunk with the panel, its
+            // edges travelled across the window as it came (Drice, 24 Sep 2026).
+            if window.peekTab != nil {
+                Color.black.opacity(0.22)
+                    .contentShape(Rectangle())
+                    .onTapGesture { window.closePeek() }
+                    .transition(.opacity)
+            }
+            if let tab = window.peekTab {
+                PeekPanel(window: window, tab: tab)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            }
+        }
+    }
+}
+
+/// The panel itself, in the middle of the page.
+struct PeekPanel: View {
+    @ObservedObject var window: WindowModel
+    @ObservedObject var tab: Tab
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                HStack(alignment: .top, spacing: 10) {
+                    Page(tab: tab, browser: window.profile)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(Palette.hairline, lineWidth: 1)
+                        )
+                        .shadow(color: .black.opacity(0.25), radius: 30, y: 10)
+                    VStack(spacing: 8) {
+                        Knob("xmark", help: "Close (esc)") { window.closePeek() }
+                        Knob("arrow.up.left.and.arrow.down.right", help: "Open as a tab (⌘↩)") { window.keepPeek() }
+                        if window.profile.prefs.splitViews {
+                            Knob("rectangle.split.2x1", help: "Open in split view") { window.splitPeek() }
+                        }
+                    }
+                }
+                .frame(width: geo.size.width * 0.82, height: geo.size.height * 0.86)
+                .offset(x: 21)
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+        }
+    }
+
+    /// Shared with the extension panel's head (see ExtensionPanel.swift).
+    struct Knob: View {
+        let symbol: String
+        let help: String
+        let act: () -> Void
+        @State private var hovering = false
+
+        init(_ symbol: String, help: String, act: @escaping () -> Void) {
+            self.symbol = symbol
+            self.help = help
+            self.act = act
+        }
+
+        var body: some View {
+            Button(action: act) {
+                Image(systemName: Symbols.current(symbol))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Palette.ink)
+                    .frame(width: 28, height: 28)
+                    .background(hovering ? Palette.hover : Palette.ground, in: Circle())
+                    .overlay(Circle().strokeBorder(Palette.hairline, lineWidth: 1))
+            }
+            .buttonStyle(Press())
+            .help(help.said)
+            .onHover { hovering = $0 }
+        }
+    }
+}
+
+/// A press you can feel: the button gives a little under the pointer and
+/// comes back, 0.97 on 200 ms ease-out, as the design rules have it. Still
+/// with Reduce Motion, where it only dims.
+struct Press: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !Motion.reduced ? 0.97 : 1)
+            .opacity(configuration.isPressed && Motion.reduced ? 0.7 : 1)
+            .animation(Motion.easeOut(0.2), value: configuration.isPressed)
+    }
+}
