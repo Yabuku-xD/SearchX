@@ -14,7 +14,7 @@ struct SavedGroup: Codable, Identifiable, Equatable {
 
     var id = UUID()
     var name: String
-    var tint: Tint?
+    var emoji: String?
     var pages: [Page]
     var saved = Date()
 }
@@ -61,7 +61,7 @@ extension WindowModel {
             return SavedGroup.Page(url: url.absoluteString, title: tab.title)
         }
         guard !pages.isEmpty else { return }
-        SavedGroups.shared.add(SavedGroup(name: group.name, tint: group.tint, pages: pages))
+        SavedGroups.shared.add(SavedGroup(name: group.name, emoji: group.emoji, pages: pages))
         for tab in members { close(tab) }
         removeTabGroup(id)
         profile.announce("Saved \(group.name) · ⌘K opens it again")
@@ -72,7 +72,7 @@ extension WindowModel {
     func reopenSavedGroup(_ id: UUID) {
         guard let saved = SavedGroups.shared.group(id) else { return }
         let group = UUID()
-        tabGroups.append(TabGroup(id: group, name: saved.name, collapsed: false, tint: saved.tint))
+        tabGroups.append(TabGroup(id: group, name: saved.name, collapsed: false, emoji: saved.emoji))
         var first: Tab?
         for page in saved.pages {
             guard let url = URL(string: page.url) else { continue }
@@ -101,9 +101,8 @@ struct SavedGroupsCard: View {
                 Card {
                     ForEach(Array(saved.all.enumerated()), id: \.element.id) { index, group in
                         if index > 0 { Rule() }
-                        Line(group.name, group.pages.count == 1 ? "1 tab" : "\(group.pages.count) tabs") {
+                        Line((group.emoji.map { $0 + " " } ?? "") + group.name, group.pages.count == 1 ? "1 tab" : "\(group.pages.count) tabs") {
                             HStack(spacing: 8) {
-                                if let tint = group.tint { TintDot(tint: tint) }
                                 Quick("Open") { browser.key?.reopenSavedGroup(group.id) }
                                 Quick("Delete", tint: .red.opacity(0.75)) { saved.remove(group.id) }
                             }

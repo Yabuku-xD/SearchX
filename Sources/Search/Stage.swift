@@ -25,7 +25,8 @@ struct Page: View {
             // before and after the float changes nothing SwiftUI can see, so
             // the stage was never told to take it back when it landed, and
             // the tab stayed empty. Nothing, then the page, is a change.
-            WebStage(page: tab.isBlank || tab.onDial || tab.asleep || tab.floating ? nil : tab.web, overlay: overlay)
+            WebStage(page: tab.isBlank || tab.onDial || tab.asleep || tab.floating ? nil : tab.web,
+                     cover: tab.cover, overlay: overlay)
 
             // The dial in the window this tab is in, not whichever window is
             // key: the tab knows the row it is in.
@@ -36,19 +37,11 @@ struct Page: View {
             // A picture behind a blank tab, if someone put one there.
             if browser != nil { WallpaperView(tab: tab) }
 
-            if let cover = tab.cover {
-                // The page as it was left, while it is rebuilt underneath —
-                // anchored where the page itself starts, and never in the
-                // way of a click meant for the page.
-                Image(nsImage: cover)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .clipped()
-                    .allowsHitTesting(false)
-                    .transition(.opacity)
-            }
-
+            // The page as it was left, while it is rebuilt underneath, is
+            // drawn by the stage itself (see StageView.cover): up here, over
+            // the stage, it sat above the column's blur, so a folded column
+            // brought out over a waking tab showed the old page sharp through
+            // it until the new one painted.
             if tab.floating {
                 // The tab is not empty, its page is simply elsewhere. Saying so
                 // is kinder than a white rectangle.
@@ -69,7 +62,6 @@ struct Page: View {
         }
         .animation(Motion.quick, value: tab.failure)
         .animation(Motion.quick, value: tab.floating)
-        .animation(Motion.easeOut(0.2), value: tab.cover == nil)
     }
 }
 
@@ -222,12 +214,14 @@ private struct HistoryList: View {
 /// reload, no lost scroll position, no forgotten form.
 struct WebStage: NSViewRepresentable {
     let page: NSView?
+    var cover: NSImage? = nil
     var overlay = PageOverlay()
 
     func makeNSView(context: Context) -> StageView { StageView() }
 
     func updateNSView(_ view: StageView, context: Context) {
         let animated = context.transaction.animation != nil && !context.transaction.disablesAnimations
+        view.cover(cover)
         view.show(page, overlay: overlay, animated: animated)
     }
 }
@@ -275,6 +269,59 @@ final class StageView: NSView {
     /// without the completion finding its layer again, and the blur then sat
     /// over the page where the column had been until the next reveal.
     private var slide: UUID?
+    /// The page as it was left, over the page being rebuilt and under the
+    /// blur, so the column out over it blurs it like the page itself. A
+    /// layer's picture, drawn by Core Animation: no view to lay out again
+    /// on every frame the page underneath paints.
+    private let covering = CoverView()
+    private var coverShown: NSImage?
+
+    /// Shown at once — a blank frame first is what it is there to hide —
+    /// and let go with a short fade when the page underneath has painted.
+    func cover(_ image: NSImage?) {
+        guard image !== coverShown else { return }
+        coverShown = image
+        if let image {
+            covering.layer?.removeAnimation(forKey: "fade")
+            covering.layer?.opacity = 1
+            covering.image = image
+            if covering.superview !== self { addSubview(covering) }
+            covering.frame = bounds
+            order()
+            return
+        }
+        guard covering.superview === self else { return }
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, let layer = covering.layer else {
+            return covering.removeFromSuperview()
+        }
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = layer.presentation()?.opacity ?? 1
+        fade.toValue = 0
+        fade.duration = 0.2
+        fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.coverShown == nil else { return }
+                self.covering.removeFromSuperview()
+            }
+        }
+        layer.opacity = 0
+        layer.add(fade, forKey: "fade")
+        CATransaction.commit()
+    }
+
+    /// Page, then the picture of it, then the blur, bottom to top. Moved
+    /// only when out of place: moving a view takes its animations away.
+    private func order() {
+        if let wanted, wanted.superview === self, covering.superview === self,
+           let page = subviews.firstIndex(of: wanted), let over = subviews.firstIndex(of: covering), over < page {
+            addSubview(covering, positioned: .above, relativeTo: wanted)
+        }
+        if let blur, blur.superview === self, subviews.last !== blur {
+            addSubview(blur, positioned: .above, relativeTo: nil)
+        }
+    }
 
     /// The Web Inspector each page off show had docked beside it. WebKit
     /// docks it once, on show; a page coming back without it was laid out
@@ -315,9 +362,10 @@ final class StageView: NSView {
         // web view, and shrinks the page to make room. Taken out on the next
         // resize, it left the page shrunk beside nothing (#91).
         let docked = inspecting
-        for view in subviews where view !== wanted && view !== blur && !(docked && Self.isInspector(view)) {
+        for view in subviews where view !== wanted && view !== blur && view !== covering && !(docked && Self.isInspector(view)) {
             view.removeFromSuperview()
         }
+        if covering.superview === self, covering.frame != bounds { covering.frame = bounds }
 
         guard let wanted, window != nil else { dropBlur(); return }
         if wanted.superview !== self {
@@ -326,7 +374,11 @@ final class StageView: NSView {
             wanted.removeFromSuperview()
             // Seen — unless it has yet to draw, and would be seen white.
             wanted.alphaValue = (wanted as? PageView)?.unpainted == true ? 0 : 1
-            addSubview(wanted)
+            if covering.superview === self {
+                addSubview(wanted, positioned: .below, relativeTo: covering)
+            } else {
+                addSubview(wanted)
+            }
             if docked, let dock = Self.docks.object(forKey: wanted) {
                 addSubview(dock, positioned: .below, relativeTo: wanted)
             }
@@ -370,7 +422,7 @@ final class StageView: NSView {
         let view = blur ?? BackgroundBlurView(frame: .zero)
         blur = view
         if view.superview !== self || subviews.last !== view {
-            addSubview(view, positioned: .above, relativeTo: page)
+            addSubview(view, positioned: .above, relativeTo: nil)
         }
         let reach = min(overlay.extent, overlay.edge == .top ? bounds.height : bounds.width) + Self.overshoot
         let frame: NSRect
@@ -641,4 +693,36 @@ final class RestingLights: NSView {
     /// Never in the way of a click: the real buttons are underneath, and they
     /// come back the moment the app does.
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+/// The picture a waking tab shows until its page paints: filling the stage,
+/// anchored at the top left where the page starts, cropped past the edges.
+final class CoverView: NSView {
+    var image: NSImage? {
+        didSet { layer?.contents = image; needsLayout = true }
+    }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.masksToBounds = true
+        layer?.contentsGravity = .resizeAspectFill
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    /// Aspect fill, as the page would sit: past the right and the bottom
+    /// when the window's shape changed while the tab slept.
+    override func layout() {
+        super.layout()
+        guard let layer, let size = image?.size, size.width > 0, size.height > 0, bounds.width > 0 else { return }
+        let scale = max(bounds.width / size.width, bounds.height / size.height)
+        let drawn = CGSize(width: size.width * scale, height: size.height * scale)
+        layer.contentsRect = CGRect(x: 0, y: 0, width: min(1, bounds.width / drawn.width), height: min(1, bounds.height / drawn.height))
+        layer.contentsGravity = .resize
+    }
 }

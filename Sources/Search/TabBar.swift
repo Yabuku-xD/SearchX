@@ -993,15 +993,25 @@ struct MiddleClick: NSViewRepresentable {
 /// by the render server and costs this process nothing.
 struct Ring: NSViewRepresentable {
     var size: CGFloat = 10
+    /// Its colour, when it sits on a ground of its own; the chrome's grey
+    /// otherwise.
+    var tint: NSColor? = nil
 
-    func makeNSView(context: Context) -> RingView { RingView() }
-    func updateNSView(_ view: RingView, context: Context) {}
+    func makeNSView(context: Context) -> RingView {
+        let view = RingView()
+        view.tint = tint
+        return view
+    }
+    func updateNSView(_ view: RingView, context: Context) { view.tint = tint }
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: RingView, context: Context) -> CGSize? {
         CGSize(width: size, height: size)
     }
 
     final class RingView: NSView {
         private let ring = CAShapeLayer()
+        var tint: NSColor? {
+            didSet { if tint != oldValue { viewDidChangeEffectiveAppearance() } }
+        }
 
         override init(frame: NSRect) {
             super.init(frame: frame)
@@ -1027,7 +1037,7 @@ struct Ring: NSViewRepresentable {
         override func viewDidChangeEffectiveAppearance() {
             super.viewDidChangeEffectiveAppearance()
             effectiveAppearance.performAsCurrentDrawingAppearance {
-                ring.strokeColor = Palette.NS.muted.withAlphaComponent(0.7).cgColor
+                ring.strokeColor = (tint ?? Palette.NS.muted.withAlphaComponent(0.7)).cgColor
             }
         }
 

@@ -790,6 +790,20 @@ final class Browser: NSObject, ObservableObject {
     }
 
     func open(space: Space.ID?, privateStore: WKWebsiteDataStore?) -> WindowModel {
+        // The last window was closed with the app still running: the next
+        // one is that window again, pins and all, as a relaunch would be.
+        if privateStore == nil, let retired, !windows.contains(where: { !$0.isPrivate }) {
+            self.retired = nil
+            let model = WindowModel(id: retired.id, profile: self, spaceID: retired.space)
+            model.folded = prefs.sidebar && prefs.sideHides
+            model.frameRequest = WindowModel.row(in: Session.read(space: retired.space), for: model.id)?.frame
+            adopt(model)
+            model.restoreSession()
+            if prefs.usesSpaces { model.preloadSpaces() }
+            BrowserHost.show(model)
+            writeSession()
+            return model
+        }
         let model = WindowModel(
             profile: self,
             spaceID: space ?? key?.spaceID ?? Space.firstID,
@@ -817,6 +831,17 @@ final class Browser: NSObject, ObservableObject {
     /// comes back through this method, and must be an idempotent operation.
     func close(_ window: WindowModel) {
         guard windows.contains(where: { $0 === window }) else { return }
+        // The last ordinary window going is not the same as its tabs going.
+        // Writing the session without it is how pinned tabs vanished: the
+        // app stays open with no window, the file says there was nothing,
+        // and the next launch believes it. Its rows are kept as they stood.
+        if !window.isPrivate, !windows.contains(where: { $0 !== window && !$0.isPrivate }) {
+            var rows = [window.spaceID: window.sessionShape(tabs: window.tabs, active: window.activeID)]
+            for (space, row) in window.parked {
+                rows[space] = window.sessionShape(tabs: row.tabs, active: row.active, groups: row.groups, splits: row.splits)
+            }
+            retired = Retired(id: window.id, space: window.spaceID, rows: rows)
+        }
         if floating.map({ id in (window.tabs + window.parkedTabs).contains { $0.id == id } }) == true { land() }
         window.closePanel(immediately: true)
         if sceneModel === window { sceneModel = nil }
@@ -827,13 +852,22 @@ final class Browser: NSObject, ObservableObject {
         host?.close()
         if let key { self.host(of: key)?.makeKeyAndOrderFront(nil) }
         writeSession()
-        if !window.isPrivate {
+        if !window.isPrivate, retired == nil {
             let closedSpaces = Set(window.parked.keys).union([window.spaceID])
             for space in closedSpaces where space != Space.firstID && !windows.contains(where: { !$0.isPrivate && ($0.spaceID == space || $0.parked[space] != nil) }) {
                 Session.write(space: space, Session.Shape(windows: []))
             }
         }
     }
+
+    /// The last ordinary window, closed while the app kept running: what it
+    /// held, per space, until a window takes it back (see open and close).
+    private struct Retired {
+        let id: WindowID
+        let space: UUID
+        let rows: [UUID: Session.WindowShape]
+    }
+    private var retired: Retired?
 
     func appLeft() {
         guard prefs.floatsAway else { return }
@@ -1118,14 +1152,19 @@ final class Browser: NSObject, ObservableObject {
                 )
             }
         }
+        // No window on screen, but the last one's tabs are still owed a
+        // place: it is written as though it were open.
+        let keeping = windows.contains { !$0.isPrivate } ? nil : retired
+        for (space, row) in keeping?.rows ?? [:] { shapes[space, default: []].append(row) }
         for (space, list) in shapes where space != Space.firstID {
             Session.write(space: space, Session.Shape(windows: list))
         }
         // Write the window locations last, after all their rows. Private
         // windows never appear in this launch layout or in a space file.
-        let layout = windows.filter { !$0.isPrivate }.map {
+        var layout = windows.filter { !$0.isPrivate }.map {
             Session.WindowLocation(id: $0.id.rawValue, space: $0.spaceID)
         }
+        if let keeping { layout.append(.init(id: keeping.id.rawValue, space: keeping.space)) }
         Session.write(Session.Shape(windows: shapes[Space.firstID] ?? [], layout: layout))
     }
 

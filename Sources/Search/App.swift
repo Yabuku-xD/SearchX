@@ -455,6 +455,8 @@ struct ContentView: View {
                     .transition(.opacity)
             }
         }
+        // Whether the page is still loading, while nothing else says so.
+        .overlay(alignment: .topLeading) { LoadingBadge(window: window) }
         .animation(Motion.quick, value: browser.suggesting)
         .clipShape(RoundedRectangle(cornerRadius: framed ? 10 : 0, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)

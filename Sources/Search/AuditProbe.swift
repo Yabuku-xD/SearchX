@@ -84,9 +84,9 @@ enum AuditProbe {
         case "close":
             guard let target = tab() else { return ["error": "no such tab"] }
             window.close(target)
-        case "groupTint":
+        case "groupEmoji":
             guard let id = group() else { return ["error": "no such group"] }
-            window.setTint((request["tint"] as? String).flatMap(Tint.init), forGroup: id)
+            window.setEmoji(request["emoji"] as? String, forGroup: id)
         case "saveGroup":
             guard let id = group() else { return ["error": "no such group"] }
             window.saveAndCloseGroup(id)
@@ -120,8 +120,8 @@ enum AuditProbe {
                  "pin": tab.pin ?? "", "asleep": tab.asleep,
                  "container": Containers.shared.container(tab.container)?.name ?? ""] as [String: Any]
             },
-            "groups": window.tabGroups.map { ["id": short($0.id), "name": $0.name, "tint": $0.tint?.rawValue ?? ""] },
-            "savedGroups": SavedGroups.shared.all.map { ["name": $0.name, "tint": $0.tint?.rawValue ?? "", "pages": $0.pages.map(\.url)] },
+            "groups": window.tabGroups.map { ["id": short($0.id), "name": $0.name, "emoji": $0.emoji ?? ""] },
+            "savedGroups": SavedGroups.shared.all.map { ["name": $0.name, "emoji": $0.emoji ?? "", "pages": $0.pages.map(\.url)] },
             "containers": Containers.shared.all.map(\.name),
             "pairs": window.splitPairs.map { ["members": $0.members.map(short), "layout": $0.layout.rawValue] },
             "visiblePair": window.visiblePair.map { $0.members.map(short) } ?? [],
@@ -149,6 +149,7 @@ enum AuditProbe {
             } ?? [:],
             "focusing": window.focusing.map(short) ?? "",
             "folded": window.folded,
+            "peeking": window.peeking,
             "panel": web.map { panel -> [String: Any] in
                 ["id": panel.id, "url": panel.tab.address?.absoluteString ?? "", "loading": panel.tab.loading,
                  "agent": panel.tab.built?.customUserAgent ?? ""]

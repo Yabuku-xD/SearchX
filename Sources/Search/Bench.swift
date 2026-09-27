@@ -137,7 +137,7 @@ final class Bench {
             unlink(path)
             return
         }
-        fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
+        _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
 
         let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: .main)
         source.setEventHandler { [weak self] in self?.accept() }
@@ -201,7 +201,7 @@ final class Bench {
             self.fd = fd
             self.handle = handle
             self.gone = gone
-            fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
+            _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
             // A script that gave up waiting has closed its end; the answer
             // arriving later must fail as a write, not as SIGPIPE, which
             // took the whole browser down with it.

@@ -29,22 +29,17 @@ struct GroupHeading: View {
     @State private var draft = ""
     @State private var hovering = false
     @State private var dropping = false
+    /// Waiting on the Character Viewer: the icon's slot is a field it types into.
+    @State private var choosing = false
+    @State private var picked = ""
     @FocusState private var focused: Bool
+    @FocusState private var picking: Bool
 
     private var editing: Bool { window.editingGroupID == group.id }
 
     var body: some View {
         HStack(spacing: 8) {
-            // The first tab’s mark is the group’s face, so a section named by
-            // the site in it reads at a glance. An empty one gets a stack.
-            if let tab = window.tabs(in: group.id).first {
-                GroupMark(tab: tab)
-            } else {
-                Image(systemName: "square.stack")
-                    .font(.system(size: 12))
-                    .frame(width: 15)
-            }
-            if let tint = group.tint { TintDot(tint: tint) }
+            icon
             if editing {
                 TextField("Group name", text: $draft)
                     .accessibilityLabel("Group name")
@@ -116,11 +111,9 @@ struct GroupHeading: View {
         .onDrag { NSItemProvider(object: "search-group:\(group.id.uuidString)" as NSString) }
         .contextMenu {
             Button("Rename Group") { window.editingGroupID = group.id }
-            Picker("Colour", selection: Binding(get: { group.tint }, set: { window.setTint($0, forGroup: group.id) })) {
-                Text("None").tag(Tint?.none)
-                ForEach(Tint.allCases) { tint in
-                    Text(tint.title.said).tag(Tint?.some(tint))
-                }
+            Button("Choose Icon…") { choose() }
+            if group.emoji != nil {
+                Button("Use Page Icon") { window.setEmoji(nil, forGroup: group.id) }
             }
             Button(group.collapsed ? "Expand Group" : "Collapse Group") {
                 window.toggleTabGroup(group.id)
@@ -147,6 +140,61 @@ struct GroupHeading: View {
     private func commit() {
         window.renameTabGroup(group.id, to: draft)
         window.editingGroupID = nil
+    }
+
+    /// The chosen emoji, else the first tab's mark, so a section named by the
+    /// site in it reads at a glance; an empty one gets a stack.
+    @ViewBuilder private var icon: some View {
+        if choosing {
+            TextField("", text: $picked)
+                .accessibilityLabel("Group icon")
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .multilineTextAlignment(.center)
+                .frame(width: 18, height: 18)
+                .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Palette.wash))
+                .focused($picking)
+                .onChange(of: picked) { _, text in
+                    guard let emoji = GroupHeading.emoji(in: text) else { return }
+                    window.setEmoji(emoji, forGroup: group.id)
+                    choosing = false
+                }
+                .onChange(of: picking) { _, now in if !now { choosing = false } }
+                .onExitCommand { choosing = false }
+                .frame(width: 15)
+        } else if let emoji = group.emoji {
+            Text(emoji)
+                .font(.system(size: 13))
+                .frame(width: 15, height: 15)
+                .accessibilityHidden(true)
+        } else if let tab = window.tabs(in: group.id).first {
+            GroupMark(tab: tab)
+        } else {
+            Image(systemName: "square.stack")
+                .font(.system(size: 12))
+                .frame(width: 15)
+        }
+    }
+
+    /// macOS's own emoji picker, the one Edit › Emoji & Symbols opens, typing
+    /// into the icon's slot.
+    private func choose() {
+        picked = ""
+        choosing = true
+        DispatchQueue.main.async {
+            picking = true
+            DispatchQueue.main.async { NSApp.orderFrontCharacterPalette(nil) }
+        }
+    }
+
+    /// The last emoji typed or picked, if any: one character, which may be
+    /// several scalars (a flag, a skin tone, a family).
+    static func emoji(in text: String) -> String? {
+        text.reversed().first { character in
+            guard let first = character.unicodeScalars.first else { return false }
+            return first.properties.isEmojiPresentation
+                || (first.properties.isEmoji && character.unicodeScalars.count > 1)
+        }.map(String.init)
     }
 }
 

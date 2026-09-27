@@ -163,12 +163,13 @@ final class Links: NSObject, NSApplicationDelegate {
     /// Runs once a window is actually showing, and one turn of the run loop
     /// after that, so the frame is on the screen before the work starts.
     /// Gives up waiting after a second or so and runs anyway — a launch
-    /// started hidden has a window nobody can see yet.
+    /// started hidden has a window nobody can see yet. The work is the main
+    /// actor's, which is what lets it cross the run loop.
     @MainActor
-    static func onceShown(_ then: @escaping () -> Void, tries: Int = 0) {
+    static func onceShown(_ then: @escaping @MainActor () -> Void, tries: Int = 0) {
         let shown = NSApp.windows.contains { $0.isVisible && $0.contentView != nil }
         if shown || tries > 40 {
-            DispatchQueue.main.async(execute: then)
+            DispatchQueue.main.async { then() }
         } else {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { onceShown(then, tries: tries + 1) }
         }

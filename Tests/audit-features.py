@@ -198,26 +198,26 @@ try:
     state = audit("panelTab")
     run.check(state["panel"] == {} and any(t["url"] == origin + "/panel-page" for t in state["tabs"]),
               "Open as Tab moves the panel's page into the row")
-    # Group colours, saved groups and containers (Firefox, Brave).
+    # Group icons, saved groups and containers (Firefox, Brave).
     fresh = {name: run.open("/" + name) for name in ("g1", "g2", "k1", "k2")}
     state = audit("group", ids=[fresh["g1"], fresh["g2"]])
     group = state["groups"][-1]["id"]
-    run.check(state["groups"][-1]["tint"] != "", "a new group gets a colour of its own")
-    state = audit("groupTint", group=group, tint="red")
-    run.check(state["groups"][-1]["tint"] == "red", "a group's colour can be changed")
+    run.check(state["groups"][-1]["emoji"] == "", "a new group wears its first page's icon until one is chosen")
+    state = audit("groupEmoji", group=group, emoji="🎧")
+    run.check(state["groups"][-1]["emoji"] == "🎧", "a group's icon can be an emoji")
     wait(lambda: [g for shape in sessions_now() for w in shape.get("windows", [shape]) for g in (w.get("groups") or [])],
-         lambda groups: any(g.get("tint") == "red" for g in groups), "session keeps the colour")
-    run.check(True, "the colour is kept in the session")
+         lambda groups: any(g.get("emoji") == "🎧" for g in groups), "session keeps the icon")
+    run.check(True, "the icon is kept in the session")
     before = len(audit("state")["tabs"])
     state = audit("saveGroup", group=group)
     run.check(len(state["tabs"]) == before - 2 and all(g["id"] != group for g in state["groups"])
-              and state["savedGroups"][0]["pages"] == [origin + "/g1", origin + "/g2"] and state["savedGroups"][0]["tint"] == "red",
-              "Save and Close Group closes its tabs and keeps its pages, name and colour")
+              and state["savedGroups"][0]["pages"] == [origin + "/g1", origin + "/g2"] and state["savedGroups"][0]["emoji"] == "🎧",
+              "Save and Close Group closes its tabs and keeps its pages, name and icon")
     state = audit("summon", text=state["savedGroups"][0]["name"])
     index = next(i for i, o in enumerate(state["offers"]) if o["kind"] == "action" and o["key"] == state["savedGroups"][0]["name"])
     state = audit("take", index=index)
     back = [t for t in state["tabs"] if t["url"] in (origin + "/g1", origin + "/g2")]
-    run.check(len(back) == 2 and len({t["group"] for t in back}) == 1 and state["groups"][-1]["tint"] == "red"
+    run.check(len(back) == 2 and len({t["group"] for t in back}) == 1 and state["groups"][-1]["emoji"] == "🎧"
               and state["savedGroups"] == [], "⌘K opens a saved group again, as it was")
 
     audit("container", id=fresh["k1"], name="Work")

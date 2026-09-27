@@ -59,7 +59,7 @@ Pages run at 120 Hz on ProMotion displays when you allow it. A mouse wheel glide
 <td valign="top">
 
 ### 🗂 Tabs, your way
-Across the top or down either side. Pinned tabs, colour-tagged groups you can split, sleep, bookmark, pin, or save and close for later, split view of up to four pages side by side, stacked or in a grid, Spaces, several windows and private windows. Shift-click a link to peek at it, then keep it as a tab or beside this one. Containers keep work and personal sign-ins apart in the same Space, each with its own cookies and site data. Sessions come back exactly as you left them.
+Across the top or down either side. Pinned tabs, groups with an emoji or their first site as an icon, which you can split, sleep, bookmark, pin, or save and close for later, split view of up to four pages side by side, stacked or in a grid, Spaces, several windows and private windows. Shift-click a link to peek at it, then keep it as a tab or beside this one. Containers keep work and personal sign-ins apart in the same Space, each with its own cookies and site data. Sessions come back exactly as you left them.
 
 </td>
 </tr>

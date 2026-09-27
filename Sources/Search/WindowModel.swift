@@ -522,7 +522,7 @@ final class WindowModel: ObservableObject, Identifiable {
     @discardableResult
     func addTabGroup(containing tab: Tab? = nil) -> UUID {
         let id = UUID()
-        tabGroups.append(TabGroup(id: id, name: "Group \(tabGroups.count + 1)", collapsed: false, tint: Tint.next(after: tabGroups.count)))
+        tabGroups.append(TabGroup(id: id, name: "Group \(tabGroups.count + 1)", collapsed: false))
         editingGroupID = id
         if let tab { move(tab, toGroup: id) }
         profile.writeSession()
@@ -543,9 +543,9 @@ final class WindowModel: ObservableObject, Identifiable {
         profile.writeSession()
     }
 
-    func setTint(_ tint: Tint?, forGroup id: UUID) {
+    func setEmoji(_ emoji: String?, forGroup id: UUID) {
         guard let index = tabGroups.firstIndex(where: { $0.id == id }) else { return }
-        tabGroups[index].tint = tint
+        tabGroups[index].emoji = emoji
         profile.writeSession()
     }
 
@@ -1478,9 +1478,16 @@ final class WindowModel: ObservableObject, Identifiable {
             let row = restoredRow(shape, in: spaceID)
             showRow(row.tabs, active: row.active, groups: row.groups, splits: row.splits)
         }
-        guard !tabs.isEmpty else {
+        // Pins come back as letters, their pages left unloaded until opened.
+        // A pin that was on screen at quit hands the screen to the first
+        // ordinary tab, or to a new one when the row is nothing but pins.
+        if active?.pin != nil {
+            activeID = tabs.first { $0.pin == nil }?.id
+        }
+        guard active != nil else {
             let tab = makeTab()
             adopt(tab)
+            activeID = tab.id
             start(tab)
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak tab] in
                 guard let tab, tab.isBlank else { return }

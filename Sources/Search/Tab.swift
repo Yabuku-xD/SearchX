@@ -72,17 +72,22 @@ enum Web {
     /// starting, the window stuck meanwhile. Sharing one lets WebKit have
     /// the next process ready: 9 to 10 ms, for the same memory and the same
     /// number of processes (measured with ./bench bookmark URL new, 24 Sep 2026).
+    /// Measured again on 27 Sep 2026: 4.9 ms with it, 52 ms without.
+    ///
+    /// Made and handed over by name rather than through the deprecated Swift
+    /// API, so the build stays free of warnings while WebKit gets the same
+    /// object it always did.
     #if DEBUG
     static var poolStartup: [String: Any] = ["created": false]
     #endif
-    static let pool = {
+    static let pool: NSObject? = {
         #if DEBUG
         let start = ProcessInfo.processInfo.systemUptime
         let visible = NSApp.windows.contains { $0.isVisible }
         #endif
-        let pool = WKProcessPool()
+        let pool = (NSClassFromString("WKProcessPool") as? NSObject.Type)?.init()
         #if DEBUG
-        poolStartup = ["created": true, "windowVisible": visible,
+        poolStartup = ["created": pool != nil, "windowVisible": visible,
                        "milliseconds": (ProcessInfo.processInfo.systemUptime - start) * 1000]
         #endif
         return pool
@@ -100,7 +105,7 @@ enum Web {
         // cookies, its own sign-ins, and nothing left behind when it closes.
         // With spaces on, each space's tabs share a store of that space's.
         config.websiteDataStore = store ?? (shy ? .nonPersistent() : MainActor.assumeIsolated { Spaces.store(for: space ?? Spaces.current) })
-        config.processPool = Web.pool
+        if let pool = Web.pool { config.setValue(pool, forKey: "processPool") }
         // Chrome extensions see every page but a private one, unless Settings
         // › Extensions says they may. The controller has to be there when the
         // view is made; it can't be added after.
@@ -729,15 +734,15 @@ final class Tab: ObservableObject, Identifiable {
         controller.addUserScript(
             WKUserScript(source: Intent.script, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
         )
-        // Passkeys stand in the page's own world — they replace the page's
-        // functions — and reach Search through a bridge in Search's, off or on:
-        // an extension's page script can carry the patch either way (see
-        // Passkeys.swift and ExtensionShims.passkeys).
-        if !FormRelay.passkeysOffered {
-            controller.addUserScript(
-                WKUserScript(source: FormRelay.withoutPasskeys, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page)
-            )
-        } else {
+        // Only inside an identity provider's sign-in frame (see SignInPrompts).
+        controller.addUserScript(
+            WKUserScript(source: SignInPrompts.script, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
+        )
+        // Passkeys, when on, stand in the page's own world — they replace the
+        // page's functions — and reach SearchX through a bridge in its own.
+        // The bridge stays either way: an extension's page script can carry
+        // the patch (see Passkeys.swift and ExtensionShims.passkeys).
+        if FormRelay.passkeysOffered {
             controller.addUserScript(
                 WKUserScript(source: PasskeyRelay.page, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page)
             )
