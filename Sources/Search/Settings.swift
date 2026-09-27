@@ -858,10 +858,8 @@ struct SettingsPanel: View {
             return next.notes ?? "Quietly, in the background — nothing you have set is touched"
         case .ready(let next):
             return next.notes ?? "It's there the next time you open SearchX"
-        case .offered(let next):
-            return next.notes ?? "Open the disk image, the same as the first time"
-        case .waiting(let next):
-            return next.notes ?? "Checked and put in place when you press Install"
+        case .offered(let next), .waiting(let next):
+            return next.notes ?? "Update replaces this copy and reopens it — tabs, sign-ins and settings stay"
         }
     }
 
@@ -877,15 +875,8 @@ struct SettingsPanel: View {
             .disabled(updater.checking)
         case .fetching:
             Ring(size: 12)
-        case .ready:
-            Pill("Relaunch now", filled: true) { updater.relaunch() }
-        case .offered(let next):
-            Pill("Download", filled: true) {
-                browser.tuning = false
-                browser.key?.open(next.dmg, foreground: true)
-            }
-        case .waiting:
-            Pill("Install", filled: true) { updater.install() }
+        case .ready, .offered, .waiting:
+            Pill("Update", filled: true) { updater.update() }
         }
     }
 

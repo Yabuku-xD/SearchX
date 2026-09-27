@@ -174,8 +174,26 @@ final class Updater: ObservableObject {
         }
     }
 
-    /// Install, because somebody pressed it: the same fetch, checks and swap
-    /// as on its own.
+    /// Update, pressed: the newer build fetched, checked and swapped in
+    /// over this one, then SearchX quits and opens again as it. Only the
+    /// bundle is replaced — the session, sign-ins, history, settings and
+    /// passwords live outside it and are there when it comes back.
+    func update() {
+        switch stage {
+        case .none, .fetching: return
+        case .ready: relaunch()
+        case .waiting(let release), .offered(let release):
+            relaunchAfter = true
+            take(release)
+        }
+    }
+
+    /// Set by Update: a swap that lands relaunches at once rather than
+    /// waiting for the next time SearchX is opened.
+    private var relaunchAfter = false
+
+    /// Installing on its own switched back on: one found and waiting is
+    /// taken quietly, for the next launch.
     func install() {
         guard case .waiting(let release) = stage else { return }
         take(release)
@@ -206,6 +224,12 @@ final class Updater: ObservableObject {
     private func landed(_ release: Release, worked: Bool) {
         guard case .fetching(let fetching) = stage, fetching == release else { return }
         stage = worked ? .ready(release) : .offered(release)
+        if relaunchAfter {
+            relaunchAfter = false
+            if worked { return relaunch() }
+            say?("SearchX couldn't replace itself here — try moving it into Applications, then Update again")
+            return
+        }
         say?(worked
             ? "SearchX \(release.version) is ready — it's there the next time you open it"
             : "SearchX \(release.version) is out — it's in Settings")
@@ -283,7 +307,7 @@ final class Updater: ObservableObject {
 /// scratch folder it made and the `.old` bundle it set aside.
 private enum Swap {
     enum Refused: Error {
-        case unsignedHere, readOnly, download, hash, archive, plist, wrongApp, notNewer, unsigned, wrongTeam, move
+        case readOnly, download, hash, archive, plist, wrongApp, notNewer, unsigned, wrongTeam, move
     }
 
     /// Where the bundle lives, and so where the new one goes.
@@ -297,10 +321,13 @@ private enum Swap {
 
     static func install(_ release: Updater.Release) async throws {
         let files = FileManager.default
-        // No Team ID on this build means it was signed ad hoc — a development
-        // build. Nothing is ever swapped in under an app that could not be
-        // told apart from anything else.
-        guard let team = teamID(of: target) else { throw Refused.unsignedHere }
+        // Signed with a Developer ID, only the same team's next build is
+        // taken. Signed ad hoc, as SearchX's own releases are for now, there
+        // is no team to match; what vouches for the new build instead is
+        // where it came from: its checksum, read from the feed over HTTPS on
+        // SearchX's own GitHub releases, the same source a DMG downloaded by
+        // hand comes from.
+        let team = teamID(of: target)
         // The folder the app is in has to take a rename, or nothing here can
         // be done: /Applications owned by another account, a disk image.
         guard files.isWritableFile(atPath: target.deletingLastPathComponent().path) else {
@@ -375,7 +402,7 @@ private enum Swap {
     /// Developer ID authority, issued to the same team as the one running.
     /// A Team ID read from the signature alone is only what the certificate
     /// says, and anyone can make a certificate that says it.
-    private static func verify(_ bundle: URL, team: String) throws {
+    private static func verify(_ bundle: URL, team: String?) throws {
         let plist = bundle.appendingPathComponent("Contents/Info.plist")
         guard let data = try? Data(contentsOf: plist),
               let info = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
@@ -390,10 +417,13 @@ private enum Swap {
         guard SecStaticCodeCreateWithPath(bundle as CFURL, [], &code) == errSecSuccess, let code else {
             throw Refused.unsigned
         }
-        guard let identifier = Bundle.main.bundleIdentifier, let requirement = developerID(team: team, identifier: identifier)
+        guard let identifier = Bundle.main.bundleIdentifier,
+              let requirement = team.map({ developerID(team: $0, identifier: identifier) }) ?? adHoc(identifier: identifier)
         else { throw Refused.unsigned }
         let strict = SecCSFlags(rawValue: kSecCSStrictValidate | kSecCSCheckAllArchitectures | kSecCSCheckNestedCode)
         guard SecStaticCodeCheckValidity(code, strict, requirement) == errSecSuccess else { throw Refused.unsigned }
+        // An ad-hoc app never takes a team's build, nor a team's app an
+        // ad-hoc one: moving between the two is done by hand, once.
         guard teamID(of: bundle) == team else { throw Refused.wrongTeam }
     }
 
@@ -408,6 +438,17 @@ private enum Swap {
             + " and certificate leaf[subject.OU] = \"\(team)\""
         var requirement: SecRequirement?
         guard SecRequirementCreateWithString(text as CFString, [], &requirement) == errSecSuccess else { return nil }
+        return requirement
+    }
+
+    /// For an ad-hoc build: a whole, intact signature on every part of the
+    /// bundle, made for this app's identifier. The hash from the feed is
+    /// what says it is SearchX's own.
+    static func adHoc(identifier: String) -> SecRequirement? {
+        var requirement: SecRequirement?
+        let text = "identifier \"\(identifier)\""
+        guard SecRequirementCreateWithString(text as CFString, [], &requirement) == errSecSuccess
+        else { return nil }
         return requirement
     }
 

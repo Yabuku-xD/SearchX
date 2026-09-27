@@ -46,6 +46,9 @@ enum AuditProbe {
             window.take(window.offers[index])
         case "dismiss":
             window.dismiss()
+        case "update":
+            // Settings › About's Update button.
+            Updater.shared.update()
         case "focus":
             window.toggleFocus()
         case "power":
@@ -115,6 +118,15 @@ enum AuditProbe {
         let web = window.panel as? WebPanel
         return [
             "active": window.activeID.map(short) ?? "",
+            "update": { () -> String in
+                switch Updater.shared.stage {
+                case .none: return "none"
+                case .fetching: return "fetching"
+                case .ready: return "ready"
+                case .offered: return "offered"
+                case .waiting: return "waiting"
+                }
+            }(),
             "tabs": window.tabs.map { tab in
                 ["id": short(tab.id), "url": tab.address?.absoluteString ?? "", "group": tab.groupID.map(short) ?? "",
                  "pin": tab.pin ?? "", "asleep": tab.asleep,
