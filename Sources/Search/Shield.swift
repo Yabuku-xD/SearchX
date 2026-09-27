@@ -45,6 +45,7 @@ final class Shield: ObservableObject {
     func isPaused(on host: String?) -> Bool {
         guard let host = host?.lowercased() else { return false }
         return paused.contains(host) || (host.hasPrefix("www.") && paused.contains(String(host.dropFirst(4))))
+            || Protections.compatible(host)
     }
 
     func pause(_ host: String, _ off: Bool) {

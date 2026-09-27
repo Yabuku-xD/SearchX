@@ -583,8 +583,14 @@ struct SettingsPanel: View {
                 Switch(on: $prefs.splitViews)
             }
             Rule()
-            Line("Sleep tabs you aren't using", "After half an hour away they come back where you left them. Pinned tabs, sound, calls and anything typed stay awake.") {
+            Line("Sleep tabs you aren't using", "After half an hour away they come back where you left them. Sound, calls and anything typed stay awake.") {
                 Switch(on: $prefs.sleepsTabs)
+            }
+            if prefs.sleepsTabs {
+                Rule()
+                Line("Let pinned tabs sleep too", "They keep their place and letter, and load again when you open them") {
+                    Switch(on: $prefs.pinsSleep)
+                }
             }
             Rule()
             Line("Load tabs when you first see them", "Tabs opened in the background, or many at once, wait until they're on screen") {
@@ -732,6 +738,12 @@ struct SettingsPanel: View {
                                 browser.key?.reload()
                             }
                         ))
+                    }
+                }
+                if Protections.available {
+                    Rule()
+                    Line("Fingerprinting protection", "Makes this Mac harder to recognise from what pages can measure. Always on in private windows. Some sign-ins may ask for a captcha more often.") {
+                        Switch(on: $prefs.fingerprinting)
                     }
                 }
                 Rule()

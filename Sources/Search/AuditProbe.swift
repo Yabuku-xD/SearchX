@@ -49,6 +49,15 @@ enum AuditProbe {
         case "update":
             // Settings › About's Update button.
             Updater.shared.update()
+        case "pin":
+            // A tab's menu's Pin.
+            guard let target = tab() else { return ["error": "no such tab"] }
+            window.pin(target)
+        case "compat":
+            // The site card's Turn On/Off Compatibility Mode.
+            guard let host = request["host"] as? String else { return ["error": "compat needs a host"] }
+            Protections.setCompatible(host, request["on"] as? Bool ?? true, in: browser)
+            return ["compatible": Protections.compatible(host), "shieldPaused": Shield.shared.isPaused(on: host)]
         case "pickIcon":
             // Choose Icon… on a group: the column held out, the Mac's emoji
             // picker brought up.

@@ -389,6 +389,8 @@ final class Extensions: NSObject, ObservableObject {
             for pattern in found.allRequestedMatchPatterns {
                 context.setPermissionStatus(.grantedExplicitly, for: pattern)
             }
+            // Sites in compatibility mode are kept from every extension.
+            for site in Protections.compatibleSites { Extensions.spare(site, true, in: context) }
             try controller.load(context)
             commandShortcuts.loaded(context, id: item.id)
             watch(context)
@@ -1661,5 +1663,21 @@ enum IconTone {
         }
         cache.setObject(NSNumber(value: value), forKey: icon)
         return value
+    }
+}
+
+@available(macOS 15.4, *)
+extension Extensions {
+    /// A site in compatibility mode (see Protections): kept from every
+    /// extension, or given back to what each was granted when it loaded.
+    func spare(_ site: String, _ on: Bool) {
+        for context in contexts.values { Extensions.spare(site, on, in: context) }
+    }
+
+    static func spare(_ site: String, _ on: Bool, in context: WKWebExtensionContext) {
+        for address in ["https://\(site)/", "http://\(site)/", "https://www.\(site)/", "http://www.\(site)/"] {
+            guard let url = URL(string: address) else { continue }
+            context.setPermissionStatus(on ? .deniedExplicitly : .unknown, for: url)
+        }
     }
 }

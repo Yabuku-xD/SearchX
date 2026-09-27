@@ -39,7 +39,7 @@ and private because it has nowhere to send your data.
 <td valign="top" width="50%">
 
 ### 🛡 Blocking, built in
-uBlock Origin's default lists, kept current and enforced inside WebKit's networking, so ads and trackers are never even requested. Scriptlets stop pop-unders and anti-adblock walls. Pop-up blocking also watches **behaviour**: a window opened without a real click, or a click hijacked into an ad tab, is stopped on sites no list has ever named. Tracking parameters like `utm_`, `fbclid` and `gclid` are removed from links.
+uBlock Origin's default lists, kept current and enforced inside WebKit's networking, so ads and trackers are never even requested. Scriptlets stop pop-unders and anti-adblock walls. Pop-up blocking also watches **behaviour**: a window opened without a real click, or a click hijacked into an ad tab, is stopped on sites no list has ever named. Tracking parameters like `utm_`, `fbclid` and `gclid` are removed from links. WebKit's own fingerprinting protection, the one Safari uses, is on in private windows and can be turned on everywhere. A site that breaks gets **Compatibility Mode** from its name in the address field: blocking, fingerprinting protection and extensions stand aside for that site alone.
 
 </td>
 <td valign="top" width="50%">

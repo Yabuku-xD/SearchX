@@ -1281,6 +1281,23 @@ final class Browser: NSObject, ObservableObject {
 // MARK: - WebKit
 
 extension Browser: WKNavigationDelegate, WKUIDelegate {
+    /// The page's own settings, before the decision below: whether WebKit
+    /// guards it against fingerprinting (see Protections). WebKit asks this
+    /// form in place of the one without preferences, so everything else is
+    /// handed on to that one as it was.
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor action: WKNavigationAction,
+        preferences: WKWebpagePreferences,
+        decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void
+    ) {
+        if action.targetFrame?.isMainFrame != false {
+            let privately = tab(for: webView)?.shy ?? !webView.configuration.websiteDataStore.isPersistent
+            Protections.guardFingerprints(Protections.guards(action.request.url?.host(), privately: privately), in: preferences)
+        }
+        self.webView(webView, decidePolicyFor: action) { decisionHandler($0, preferences) }
+    }
+
     /// Links the window has no business showing — mail, calls, an app's own
     /// scheme — are handed to whoever does own them.
     func webView(

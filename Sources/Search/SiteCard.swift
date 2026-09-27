@@ -216,6 +216,14 @@ struct SiteCard: View {
                 Row(safety.title, submenu: true) { deeper = true }
             }
             Row("Copy Address", keys: "⇧⌘C") { after { window.copyAddress() } }
+            // For a site that breaks: blocking, scriptlets, fingerprinting
+            // protection and extensions stand aside here (see Protections).
+            if let host = tab.address?.host(), !host.isEmpty {
+                let on = Protections.compatible(host)
+                Row(on ? "Turn Off Compatibility Mode" : "Turn On Compatibility Mode") {
+                    after { Protections.setCompatible(host, !on, in: browser) }
+                }
+            }
             Separator()
             Row("Print…", keys: "⌘P") { after { browser.printPage() } }
             zoom

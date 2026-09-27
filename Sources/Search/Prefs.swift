@@ -166,6 +166,17 @@ final class Preferences: ObservableObject {
     @Published var sleepsTabs: Bool {
         didSet { store.set(sleepsTabs, forKey: "tabs.sleep") }
     }
+    /// Pinned tabs sleep on the same clock as the rest, keeping their place
+    /// and their letter (Orion's users asked for this of Orion). Off unless
+    /// turned on: a pin is often a page kept warm on purpose.
+    @Published var pinsSleep: Bool {
+        didSet { store.set(pinsSleep, forKey: "pins.sleep") }
+    }
+    /// WebKit's fingerprinting protection on every page, not only private
+    /// ones (see Protections). Off unless turned on.
+    @Published var fingerprinting: Bool {
+        didSet { store.set(fingerprinting, forKey: "privacy.fingerprinting") }
+    }
     /// tabs load when they're first on screen, not when they're opened. off unless turned on.
     @Published var lazyTabs: Bool {
         didSet { store.set(lazyTabs, forKey: "tabs.lazy") }
@@ -437,6 +448,8 @@ final class Preferences: ObservableObject {
         keywords = store.data(forKey: "search.keywords")
             .flatMap { try? JSONDecoder().decode([Keyword].self, from: $0) } ?? []
         sleepsTabs = store.object(forKey: "tabs.sleep") as? Bool ?? true
+        pinsSleep = store.bool(forKey: "pins.sleep")
+        fingerprinting = store.bool(forKey: "privacy.fingerprinting")
         lazyTabs = store.bool(forKey: "tabs.lazy")
         mruTabs = store.bool(forKey: "tabs.mru")
         showsReading = store.object(forKey: "tabs.reading") as? Bool ?? true
