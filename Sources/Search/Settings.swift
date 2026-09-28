@@ -273,7 +273,7 @@ struct SettingsPanel: View {
                 .padding(.bottom, 11)
             }
             Rule()
-            Line("Site shortcuts", "A word before your search goes straight to that site, whatever engine you've picked - \"yt cats\" to YouTube") {
+            Line("Site shortcuts", "A word before your search goes straight to that site, whatever engine you've picked. \"yt cats\" searches YouTube") {
                 Pill("Add") { prefs.keywords.append(Keyword()) }
             }
             ForEach($prefs.keywords) { $entry in
@@ -303,7 +303,7 @@ struct SettingsPanel: View {
                 .padding(.bottom, 6)
             }
             Rule()
-            Line("Colour", "A gradient for the frame around the page, as faint or strong as you like — each space its own") {
+            Line("Colour", "A gradient for the frame around the page, as faint or strong as you like. Each space has its own") {
                 Pill("Choose…") {
                     browser.tuning = false
                     browser.theming = true
@@ -319,7 +319,7 @@ struct SettingsPanel: View {
                 }
             }
             Rule()
-            Line("Correct spelling as you type", "macOS's autocorrect inside pages — the one that capitalises for you") {
+            Line("Correct spelling as you type", "macOS's autocorrect inside pages, the one that capitalises for you") {
                 Switch(on: $prefs.autocorrect)
             }
             Rule()
@@ -385,7 +385,7 @@ struct SettingsPanel: View {
                 Switch(on: $prefs.floatsAway)
             }
             Rule()
-            Line("Let a script drive SearchX", "A local socket for testing. Its tabs open beside yours with a flask on them and never take over — see ./bench") {
+            Line("Let a script drive SearchX", "A local socket for testing. Its tabs open beside yours with a flask on them and never take over. See ./bench") {
                 Switch(on: $prefs.bench)
             }
         }
@@ -424,7 +424,7 @@ struct SettingsPanel: View {
             }
 
             Rule()
-            Line("Transparency", "See through the bars and the sidebar: to the desktop beside the page, or to the page under a sidebar that slides out.") {
+            Line("Transparency", "See through the bars and the sidebar, to the desktop beside the page or to the page under a sidebar that slides out.") {
                 chromeSlider("Transparency", value: $prefs.chromeTransparency)
                     .disabled(reduceTransparency)
             }
@@ -600,11 +600,11 @@ struct SettingsPanel: View {
                 Switch(on: $prefs.lazyTabs)
             }
             Rule()
-            Line("Ctrl+Tab walks recent tabs", "Most recently looked at first, like switching apps — hold it and press Tab again for the one before that. Off, it walks the row in order.") {
+            Line("Ctrl+Tab walks recent tabs", "Most recently looked at first, like switching apps. Hold it and press Tab again for the one before that. Off, it walks the row in order.") {
                 Switch(on: $prefs.mruTabs)
             }
             Rule()
-            Line("Spaces", "Separate sets of tabs, signed in where the others are or starting afresh, switched with ⌃1–⌃9, two fingers sideways over the column, or the space's icon. Mission Control's own ⌃1–⌃9, if you turned them on, take those keys first.") {
+            Line("Spaces", "Separate sets of tabs, signed in where the others are or starting afresh, switched with ⌃1 to ⌃9, two fingers sideways over the column, or the space's icon. Mission Control's own ⌃1 to ⌃9, if you turned them on, take those keys first.") {
                 Switch(on: $prefs.usesSpaces)
             }
             Rule()
@@ -623,7 +623,7 @@ struct SettingsPanel: View {
     /// Says so when a password manager extension has taken the saving over.
     private var savingDetail: String {
         if #available(macOS 15.4, *), let name = Extensions.shared.passwordSavingTakenBy {
-            return "\(name) does the saving — it asked SearchX not to offer"
+            return "\(name) does the saving. It asked SearchX not to offer"
         }
         return "Asked once per site, never again for a site you refuse"
     }
@@ -649,9 +649,9 @@ struct SettingsPanel: View {
                 Line(
                     "Offer passkeys",
                     !prefs.passkeysPossible
-                        ? "Needs an Apple entitlement this build doesn't have — off keeps sites to the password"
+                        ? "Needs an Apple entitlement this build doesn't have. Off, sites ask for the password"
                         : Passkeys.access == .denied
-                        ? "macOS was told no — System Settings › Privacy & Security › Passkeys Access for Web Browsers"
+                        ? "macOS said no. Allow it in System Settings › Privacy & Security › Passkeys Access for Web Browsers"
                         : "Touch ID or an iCloud passkey, on sites that offer one"
                 ) {
                     Switch(on: $prefs.passkeys)
@@ -667,7 +667,7 @@ struct SettingsPanel: View {
                 }
             }
             Card {
-                Line("Bring yours in", "From another browser on this Mac — nothing leaves it") {
+                Line("Bring yours in", "From another browser on this Mac. Nothing leaves it") {
                     Pill("Import…") {
                         browser.tuning = false
                         browser.managing = true
@@ -697,7 +697,7 @@ struct SettingsPanel: View {
     private var filterDetail: String {
         let status = filters.status
         if let trouble = status.trouble { return trouble }
-        if status.working && status.updated == nil { return "Getting uBlock Origin’s lists — the built-in list works meanwhile" }
+        if status.working && status.updated == nil { return "Getting uBlock Origin’s lists. The built-in list works meanwhile" }
         guard let updated = status.updated else { return "uBlock Origin’s lists, checked every four days" }
         let rules = status.rules.formatted(.number)
         return "uBlock Origin’s lists · \(rules) rules · updated \(updated.formatted(.relative(presentation: .named)))"
@@ -711,7 +711,7 @@ struct SettingsPanel: View {
                 }
                 if let trouble = shield.trouble {
                     Rule()
-                    Line(trouble, "Nothing is being blocked until this clears — try again, or restart SearchX") {
+                    Line(trouble, "Nothing is blocked until this clears. Try again, or restart SearchX") {
                         Pill("Try again") { shield.compile() }
                     }
                 }
@@ -731,7 +731,7 @@ struct SettingsPanel: View {
                         }
                     }
                     Rule()
-                    Line("My filters", "Your own, in uBlock Origin’s syntax — procedural ones too. Never on sign-in, passkey or payment pages") {
+                    Line("My filters", "Your own, in uBlock Origin’s syntax, procedural ones included. They never act on sign-in, passkey or payment pages") {
                         Pill("Edit filters") { browser.tuning = false; browser.blockering = .filters }
                     }
                     Rule()
@@ -741,18 +741,6 @@ struct SettingsPanel: View {
                     Rule()
                     Line("Blocker log", "What was blocked on the page in front, and what it loaded") {
                         Pill("Open log") { browser.tuning = false; browser.blockering = .log }
-                    }
-                }
-                if let host = browser.hereHost, prefs.shielded, shield.trouble == nil {
-                    Rule()
-                    Line("Block on \(host)", "Turn off here if the site breaks — the page reloads") {
-                        Switch(on: Binding(
-                            get: { !Shield.shared.isPaused(on: host) },
-                            set: { on in
-                                Shield.shared.pause(host, !on)
-                                browser.key?.reload()
-                            }
-                        ))
                     }
                 }
                 if Protections.available {
@@ -881,14 +869,14 @@ struct SettingsPanel: View {
     private var versionDetail: String {
         switch updater.stage {
         case .none:
-            return updater.lastChecked.map { "Checked \($0.formatted(.relative(presentation: .named))) — once a day on its own" }
+            return updater.lastChecked.map { "Checked \($0.formatted(.relative(presentation: .named))). SearchX checks once a day on its own" }
                 ?? "Checked once a day on its own"
         case .fetching(let next):
-            return next.notes ?? "Quietly, in the background — nothing you have set is touched"
+            return next.notes ?? "Quietly, in the background. Nothing you have set is touched"
         case .ready(let next):
             return next.notes ?? "It's there the next time you open SearchX"
         case .offered(let next), .waiting(let next):
-            return next.notes ?? "Update replaces this copy and reopens it — tabs, sign-ins and settings stay"
+            return next.notes ?? "Update replaces this copy and reopens it. Tabs, sign-ins and settings stay"
         }
     }
 

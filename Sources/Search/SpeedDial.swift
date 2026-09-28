@@ -337,7 +337,7 @@ struct SpeedDialPage: View {
             recent = ghosts.map(\.url)
             if !ghosts.isEmpty { label("Recently Closed", bold: true) }
             for (index, ghost) in ghosts.enumerated() {
-                button(ghost.label + " — " + (ghost.url.host ?? ""), tag: index)
+                button(ghost.label + " · " + (ghost.url.host ?? ""), tag: index)
             }
             if let error = dial.error {
                 label(error)

@@ -541,7 +541,7 @@ final class Extensions: NSObject, ObservableObject {
             let found = try? await WKWebExtension(resourceBaseURL: staged ?? target)
             if found == nil, let staged {
                 try? files.removeItem(at: staged)
-                browser?.announce("\(item.name) wasn't reloaded — its manifest couldn't be read")
+                browser?.announce("\(item.name) wasn't reloaded because its manifest couldn't be read")
                 return
             }
             if let found {
@@ -550,7 +550,7 @@ final class Extensions: NSObject, ObservableObject {
                     let name = [found.displayName ?? item.name, found.version].compactMap { $0 }.joined(separator: " ")
                     guard await ask(install: name, wants: Extensions.describe(found, in: staged ?? target), icon: found.icon(for: CGSize(width: 64, height: 64))) else {
                         if let staged { try? files.removeItem(at: staged) }
-                        browser?.announce("\(item.name) wasn't reloaded — it asks for more than before")
+                        browser?.announce("\(item.name) wasn't reloaded because it now asks for more than before")
                         return
                     }
                 }
@@ -575,7 +575,7 @@ final class Extensions: NSObject, ObservableObject {
                 save()
             }
             guard let item = installed.first(where: { $0.id == id }), item.enabled else { return }
-            browser?.announce(await load(item) ? "\(item.name) reloaded" : "\(item.name) couldn't start — see Settings › Extensions")
+            browser?.announce(await load(item) ? "\(item.name) reloaded" : "\(item.name) couldn't start. See Settings › Extensions")
         }
     }
 

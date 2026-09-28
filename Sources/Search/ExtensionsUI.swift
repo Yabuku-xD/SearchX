@@ -11,7 +11,7 @@ struct ExtensionsPage: View {
             Installer(browser: browser, extensions: .shared)
         } else {
             Card {
-                Line("Chrome extensions", "Need macOS 15.4 or later — the version whose WebKit can run them.") { EmptyView() }
+                Line("Chrome extensions", "Need macOS 15.4 or later, the first version whose WebKit can run them.") { EmptyView() }
             }
         }
     }
@@ -82,7 +82,7 @@ struct ExtensionsPage: View {
                 }
 
                 Card {
-                    Line("Allow on private tabs", "Off by default - a private tab keeps nothing, extensions included") {
+                    Line("Allow on private tabs", "Off by default. A private tab keeps nothing, extensions included") {
                         Switch(on: Binding(
                             get: { browser.prefs.extensionsInPrivate },
                             set: { browser.prefs.extensionsInPrivate = $0 }
@@ -107,7 +107,7 @@ struct ExtensionsPage: View {
                 }
 
                 Card {
-                    Line("Load an unpacked extension", "A folder with a manifest.json — your own, or one exported from another browser. Reload picks up what you've changed in it since.") {
+                    Line("Load an unpacked extension", "A folder with a manifest.json, your own or one exported from another browser. Reload picks up what you've changed in it since.") {
                         Pill("Choose…") { extensions.installFolder() }
                     }
                 }

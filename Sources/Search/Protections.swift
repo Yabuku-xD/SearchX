@@ -47,7 +47,17 @@ enum Protections {
 
     // MARK: - compatibility mode
 
-    private(set) static var compatibleSites: Set<String> = Set(Store.settings.stringArray(forKey: "compat.sites") ?? [])
+    private(set) static var compatibleSites: Set<String> = {
+        var sites = Set(Store.settings.stringArray(forKey: "compat.sites") ?? [])
+        // Sites turned off with the per-site blocker switch Settings once
+        // had carry over, once, into the one per-site switch there is now.
+        if let paused = Store.settings.stringArray(forKey: "shield.paused") {
+            sites.formUnion(paused.map(key))
+            Store.settings.set(Array(sites).sorted(), forKey: "compat.sites")
+            Store.settings.removeObject(forKey: "shield.paused")
+        }
+        return sites
+    }()
 
     private static func key(_ host: String) -> String {
         let host = host.lowercased()

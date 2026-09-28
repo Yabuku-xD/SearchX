@@ -1004,7 +1004,7 @@ final class Browser: NSObject, ObservableObject {
                 Shield.shared.apply(to: allTabs.compactMap { tab in
                     tab.built.map { ($0.configuration.userContentController, tab.address?.host()?.lowercased()) }
                 })
-                announce(on ? "Ads and trackers blocked" : "Blocking off — reload to see the difference")
+                announce(on ? "Ads and trackers blocked" : "Blocking off. Reload to see the difference")
             }
             .store(in: &bag)
 
@@ -1017,7 +1017,7 @@ final class Browser: NSObject, ObservableObject {
                 Shield.shared.apply(to: allTabs.compactMap { tab in
                     tab.built.map { ($0.configuration.userContentController, tab.address?.host()?.lowercased()) }
                 })
-                announce(on ? "Filter lists on" : "Filter lists off — reload to see the difference")
+                announce(on ? "Filter lists on" : "Filter lists off. Reload to see the difference")
             }
             .store(in: &bag)
 
@@ -1048,7 +1048,7 @@ final class Browser: NSObject, ObservableObject {
             .sink { [weak self] on in
                 guard let self else { return }
                 if on { Bench.shared.start(for: self) } else { Bench.shared.stop() }
-                announce(on ? "Scripts can drive SearchX — see ./bench" : "The bench is closed")
+                announce(on ? "Scripts can drive SearchX. See ./bench" : "The bench is closed")
             }
             .store(in: &bag)
 
@@ -1112,7 +1112,7 @@ final class Browser: NSObject, ObservableObject {
                 for tab in allTabs {
                     tab.arm(hiding: curtain.css(on: curtain.host(of: tab.address)))
                 }
-                announce(on ? "Passkeys offered again — reload the page" : "Sites will ask for a password instead")
+                announce(on ? "Passkeys offered again. Reload the page" : "Sites will ask for a password instead")
             }
             .store(in: &bag)
 

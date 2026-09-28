@@ -18,12 +18,11 @@
 "Where words that aren't an address go" = "アドレスではない語句をどこで検索するか";
 "Custom" = "カスタム";
 "Appearance" = "外観";
-"Light, dark, or whatever the Mac is doing — pages follow it too" = "ライト、ダーク、または Mac の設定に合わせます — ウェブページもそれに従います";
 "Light" = "ライト";
 "Dark" = "ダーク";
 "System" = "システム";
 "Correct spelling as you type" = "入力中にスペルを修正";
-"macOS's autocorrect inside pages — the one that capitalises for you" = "ページ内での macOS の自動修正 — 大文字にしてくれるもの";
+"macOS's autocorrect inside pages, the one that capitalises for you" = "ページ内での macOS の自動修正。大文字にしてくれるもの";
 "Peek at a link with a shift-click" = "Shift＋クリックでリンクをプレビュー";
 "Its page opens in a panel over the one you're reading. Escape puts it away; the other button keeps it as a tab" = "読んでいるページの上にパネルで開きます。esc で閉じ、もう一方のボタンでタブとして残します";
 "Open links from other apps in a small window" = "他のアプリからのリンクを小さなウインドウで開く";
@@ -41,7 +40,7 @@
 "Float the video when you switch apps" = "アプリを切り替えるときにビデオを浮かべる";
 "A video playing on the site you're on comes out into its floating window as another app comes to the front, and goes back into its tab when you return" = "別のアプリが前面に来ると、現在のサイトで再生中のビデオが浮動ウインドウに出て、戻るとタブに戻ります";
 "Let a script drive SearchX" = "スクリプトに SearchX を操作させる";
-"A local socket for testing. Its tabs open beside yours with a flask on them and never take over — see ./bench" = "テスト用のローカルソケットです。そのタブはあなたのタブの横にフラスコ付きで開き、操作を乗っ取りません — ./bench を参照";
+"A local socket for testing. Its tabs open beside yours with a flask on them and never take over. See ./bench" = "テスト用のローカルソケットです。そのタブはあなたのタブの横にフラスコ付きで開き、操作を乗っ取りません。./bench を参照";
 "Tabs in a sidebar" = "タブをサイドバーに表示";
 "Down the left instead of across the top. Pull its edge to make it wider; double-click the edge to reset." = "上ではなく左に並べます。端を引っぱると広くなり、ダブルクリックで元に戻ります。";
 "Hide the sidebar until the pointer reaches the edge" = "ポインタが端に届くまでサイドバーを隠す";
@@ -57,7 +56,7 @@
 "Sleep tabs you aren't using" = "使っていないタブをスリープ";
 "After half an hour away they come back where you left them. Pinned tabs, sound, calls and anything typed stay awake." = "30 分離れるとスリープし、戻ると元の状態に戻ります。固定したタブ、音声、通話中、入力済みのページはスリープしません。";
 "Spaces" = "スペース";
-"Separate sets of tabs, signed in where the others are or starting afresh, switched with ⌃1–⌃9, two fingers sideways over the column, or the space's icon. Mission Control's own ⌃1–⌃9, if you turned them on, take those keys first." = "タブのグループを分け、それぞれ別にサインインするか新しく始められます。⌃1–⌃9、コラム上での二本指の横スワイプ、またはスペースのアイコンで切り替えます。Mission Control の ⌃1–⌃9 を有効にしている場合、それが先にキーを取ります。";
+"Separate sets of tabs, signed in where the others are or starting afresh, switched with ⌃1 to ⌃9, two fingers sideways over the column, or the space's icon. Mission Control's own ⌃1 to ⌃9, if you turned them on, take those keys first." = "タブのグループを分け、それぞれ別にサインインするか新しく始められます。⌃1〜⌃9、コラム上での二本指の横スワイプ、またはスペースのアイコンで切り替えます。Mission Control の ⌃1〜⌃9 を有効にしている場合、それが先にキーを取ります。";
 "Your passwords" = "あなたのパスワード";
 "In the macOS keychain, shown with Touch ID" = "macOS のキーチェーンにあり、Touch ID で表示します";
 "Open…" = "開く…";
@@ -70,7 +69,6 @@
 "Sites never asked" = "拒否済みのサイト";
 "Forget" = "リセット";
 "Bring yours in" = "あなたのものを読み込む";
-"From Dia, Chrome, Arc, Brave or Edge on this Mac — nothing leaves it" = "この Mac の Dia、Chrome、Arc、Brave、Edge から — データは Mac から出ません";
 "Import…" = "読み込む…";
 "Save to" = "保存先";
 "Change…" = "変更…";
@@ -145,7 +143,7 @@
 "Download failed" = "ダウンロードに失敗しました";
 "Download finished" = "ダウンロードが完了しました";
 "Everything is back" = "すべて元に戻りました";
-"Hidden — ⌘Z puts it back" = "非表示にしました — ⌘Z で元に戻せます";
+"Hidden. ⌘Z puts it back" = "非表示にしました。⌘Z で元に戻せます";
 "History cleared" = "履歴を消去しました";
 "Image copied" = "画像をコピーしました";
 "Link copied" = "リンクをコピーしました";
@@ -164,7 +162,7 @@
 "The page didn't load." = "ページを読み込めませんでした。";
 "The site refused the connection." = "サイトが接続を拒否しました。";
 "The site took too long to answer." = "サイトの応答が遅すぎます。";
-"Hidden on this site — rest on a line to see it" = "このサイトで非表示 — 行に置くと見られます";
+"Hidden on this site. Rest the pointer on a line to see it" = "このサイトで非表示。行に置くと見られます";
 "Nothing is hidden here." = "ここには非表示のものはありません。";
 "Hide something…" = "要素を隠す…";
 "Restore" = "復元";
@@ -213,7 +211,7 @@
 "None of your extensions is on" = "有効な機能拡張はありません";
 "That folder has no manifest.json" = "そのフォルダに manifest.json がありません";
 "That isn't a Chrome Web Store link or extension id" = "Chrome ウェブストアのリンクまたは機能拡張 ID ではありません";
-"The Chrome Web Store has nothing for that id — it may have been taken down, or only exist for old versions of Chrome" = "Chrome ウェブストアにその ID の機能拡張はありません — 削除されたか、旧バージョンの Chrome 専用かもしれません";
+"The Chrome Web Store has nothing for that id. It may have been taken down, or exist only for old versions of Chrome" = "Chrome ウェブストアにその ID の機能拡張はありません。削除されたか、旧バージョンの Chrome 専用かもしれません";
 "The extension couldn't be unpacked" = "機能拡張を展開できませんでした";
 "The extension's signature doesn't hold up" = "機能拡張の署名を検証できませんでした";
 "What came back isn't a Chrome extension" = "返されたものは Chrome 機能拡張ではありません";
@@ -224,7 +222,7 @@
 "New space" = "新しいスペース";
 "A browser with nothing in the way. Four megabytes, the engine already in your Mac, and as little around the page as we could manage." = "邪魔なもののないブラウザ。4 メガバイト、すでにあなたの Mac にあるエンジン、そしてページの周りを可能な限り減らしました。";
 "A few things worth knowing" = "知っておきたいこと";
-"No other browser found on this Mac — nothing to bring." = "この Mac に他のブラウザが見つかりません — 読み込めるものがありません。";
+"No other browser on this Mac, so there's nothing to bring." = "この Mac に他のブラウザが見つかりません。読み込めるものがありません。";
 "SearchX is the default browser" = "SearchX は既定のブラウザです";
 "Skip" = "スキップ";
 "Tabs wear" = "タブが身につける";

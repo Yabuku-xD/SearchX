@@ -307,7 +307,7 @@ private struct FiltersPage: View {
         Editor(
             text: $draft,
             label: "My filters",
-            hint: "uBlock Origin’s syntax, one filter a line — for example youtube.com##ytd-rich-shelf-renderer:has-text(Shorts)",
+            hint: "uBlock Origin’s syntax, one filter a line. For example youtube.com##ytd-rich-shelf-renderer:has-text(Shorts)",
             status: "\(own.report.filters) filter\(own.report.filters == 1 ? "" : "s") · never on sign-in, passkey or payment pages",
             problem: problem,
             save: "Save filters",
@@ -334,7 +334,7 @@ private struct RulesPage: View {
         Editor(
             text: $draft,
             label: "My rules",
-            hint: "One rule a line: source destination type action — for example example.com * 3p-script block. Types: * 3p 3p-script 3p-frame 1p-script inline-script image. Actions: block, allow, noop.",
+            hint: "One rule a line, as source destination type action. For example example.com * 3p-script block. Types: * 3p 3p-script 3p-frame 1p-script inline-script image. Actions: block, allow, noop.",
             status: "\(own.report.rules) rule\(own.report.rules == 1 ? "" : "s") · allow rules reach uBlock Origin’s lists after a short compile",
             problem: problem,
             save: "Save rules",

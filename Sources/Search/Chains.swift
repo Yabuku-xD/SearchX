@@ -198,7 +198,7 @@ private struct ChainRow: View {
         if let other = Chains.shared.all.first(where: { $0.id != chain.id && $0.key == combo }) { return "Used by \(other.name)" }
         if let owner = store.owner(of: combo, except: ""), taking != combo {
             taking = combo
-            return "Used by \(owner.title) — press again"
+            return "Used by \(owner.title). Press again to take it"
         }
         if let owner = store.owner(of: combo, except: "") { store.clear(owner.id) }
         set(key: combo)

@@ -169,7 +169,7 @@ final class Updater: ObservableObject {
             case .waiting(let known) where known == found: break
             case .none, .offered, .waiting:
                 stage = .waiting(found)
-                say?("SearchX \(found.version) is out — it's in Settings")
+                say?("SearchX \(found.version) is out. Update it from Settings")
             }
         }
     }
@@ -227,12 +227,12 @@ final class Updater: ObservableObject {
         if relaunchAfter {
             relaunchAfter = false
             if worked { return relaunch() }
-            say?("SearchX couldn't replace itself here — try moving it into Applications, then Update again")
+            say?("SearchX couldn't replace itself here. Move it into Applications, then choose Update again")
             return
         }
         say?(worked
-            ? "SearchX \(release.version) is ready — it's there the next time you open it"
-            : "SearchX \(release.version) is out — it's in Settings")
+            ? "SearchX \(release.version) is ready. You'll have it the next time you open SearchX"
+            : "SearchX \(release.version) is out. Update it from Settings")
     }
 
     /// Quit, and come back as the new one. A shell waits for this process

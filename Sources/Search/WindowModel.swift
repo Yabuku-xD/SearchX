@@ -1727,7 +1727,7 @@ final class WindowModel: ObservableObject, Identifiable {
             let css = profile.curtain.css(on: host)
             tab.arm(hiding: css)
             tab.applyVeils(css)
-            profile.announce("Hidden — ⌘Z puts it back")
+            profile.announce("Hidden. ⌘Z puts it back")
         }
         tab.onPickEnd = { [weak self] _ in self?.profile.veiling = false }
         tab.capturePicked = { [weak self] tab, rect in self?.finishElementCapture(tab, rect: rect) }
@@ -1811,7 +1811,7 @@ final class WindowModel: ObservableObject, Identifiable {
             profile.offering = offer
         }
         tab.onPickTrouble = { [weak self] _, reason in
-            self?.profile.announce("Couldn't hide that — \(reason)")
+            self?.profile.announce("Couldn't hide that. \(reason)")
         }
 
         // The line at the bottom doubles as the zoom read-out: it keeps being

@@ -35,22 +35,11 @@ final class Shield: ObservableObject {
         enabled && !isPaused(on: host)
     }
 
-    /// Sites it is off for — the ones it broke. A checkout that never
-    /// finishes, a video that never starts: switching off here, for this site,
-    /// beats switching off everywhere and forgetting to switch back.
-    private(set) var paused: Set<String> = Set(
-        Store.settings.stringArray(forKey: "shield.paused") ?? []
-    )
-
+    /// Off for the sites in Compatibility Mode, the one switch for a site it
+    /// broke (see Protections): a checkout that never finishes, a video that
+    /// never starts. Off for that site beats off everywhere and forgotten.
     func isPaused(on host: String?) -> Bool {
-        guard let host = host?.lowercased() else { return false }
-        return paused.contains(host) || (host.hasPrefix("www.") && paused.contains(String(host.dropFirst(4))))
-            || Protections.compatible(host)
-    }
-
-    func pause(_ host: String, _ off: Bool) {
-        if off { paused.insert(host) } else { paused.remove(host) }
-        Store.settings.set(Array(paused).sorted(), forKey: "shield.paused")
+        Protections.compatible(host)
     }
 
     /// Before each page: the lists go on or off for the site this tab is

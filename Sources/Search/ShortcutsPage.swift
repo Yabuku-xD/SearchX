@@ -71,7 +71,7 @@ private struct KeyBox: View {
             }
             if let owner = store.owner(of: combo, except: command.id), taking != combo {
                 taking = combo
-                return "Used by \(owner.title) — press again"
+                return "Used by \(owner.title). Press again to take it"
             }
             if let chain = Chains.shared.all.first(where: { $0.key == combo }) {
                 return "Used by \(chain.name)"

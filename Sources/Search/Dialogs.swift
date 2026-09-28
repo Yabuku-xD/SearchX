@@ -164,7 +164,7 @@ extension Browser {
         alert.messageText = "\(space.host) asks you to sign in"
         alert.informativeText = space.realm.map { "“\($0)”" } ?? "The site wants a name and a password."
         if challenge.previousFailureCount > 0 {
-            alert.informativeText += "\nThat wasn't accepted — try again."
+            alert.informativeText += "\nThat wasn't accepted. Try again."
         }
         alert.addButton(withTitle: "Sign In")
         alert.addButton(withTitle: "Cancel")

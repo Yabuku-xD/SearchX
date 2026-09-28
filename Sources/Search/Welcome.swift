@@ -84,7 +84,7 @@ struct WelcomePanel: View {
 
             let sources = ImportSource.installed()
             if sources.isEmpty {
-                Text("No other browser found on this Mac — nothing to bring.")
+                Text("No other browser on this Mac, so there's nothing to bring.")
                     .font(.system(size: 13))
                     .foregroundStyle(Palette.faint)
             } else {
@@ -146,7 +146,7 @@ struct WelcomePanel: View {
 
     private var links: some View {
         VStack(alignment: .leading, spacing: 22) {
-            heading("Links from other apps.", "A click in Mail, in Slack, in a PDF — macOS sends it to whichever browser is the default. It can be this one.")
+            heading("Links from other apps.", "A link clicked in Mail, Slack or a PDF opens in your default browser. That can be this one.")
             HStack(spacing: 12) {
                 if isDefault {
                     HStack(spacing: 8) {
@@ -253,7 +253,7 @@ struct WelcomePanel: View {
                         }
                     case .failure(Chromium.Trouble.noPassphrase):
                         bringFailed = true
-                        lines.append("sign-ins: macOS didn't hand over the key — allow it and try again")
+                        lines.append("sign-ins: macOS didn't hand over the key. Allow it and try again")
                         group.leave()
                     case .failure:
                         bringFailed = true
@@ -284,9 +284,9 @@ struct WelcomePanel: View {
                             if wantsSignIns { importSignIns() }
                         case .failure(Chromium.Trouble.noPassphrase):
                             bringFailed = true
-                            lines.append("passwords: macOS didn't hand over the key — allow it and try again")
+                            lines.append("passwords: macOS didn't hand over the key. Allow it and try again")
                             if wantsSignIns {
-                                lines.append("sign-ins: macOS didn't hand over the key — allow it and try again")
+                                lines.append("sign-ins: macOS didn't hand over the key. Allow it and try again")
                             }
                         case .failure:
                             bringFailed = true
