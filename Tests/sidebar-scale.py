@@ -38,6 +38,14 @@ def hitches(h, seconds, during):
     out = h.ask('native', action='hitches')
     return {'missed': out['missed'], 'worstMs': round(out['worstMs'], 1), 'p99Ms': round(out['p99Ms'], 1)}
 
+def row_at(h, title):
+    """Where a row of the column sits, in window points from the top left —
+    found through its accessibility frame (screen points, from the bottom)."""
+    nodes = h.ask('native', action='nodes')['nodes']
+    window = nodes[0]['frame']
+    x, y, w, height = next(n['frame'] for n in nodes if n['role'] == 'AXStaticText' and n['value'] == title)
+    return x - window[0] + w / 2, window[1] + window[3] - (y + height / 2)
+
 def measure(binary, big):
     h = Headless(binary, prefs={'sidebar': True, 'sidebar.hides': False, 'tabs.groups': True}, session=session(big))
     out = {'tabs': len(h.ask('tabs')['tabs'])}
@@ -58,9 +66,20 @@ def measure(binary, big):
             h.ask('resize', width=1000, height=700, steps=40); h.ask('resize', width=1300, height=860, steps=40)
         out['resizing'] = hitches(h, 4, resize)
         def drag():
-            h.ask('native', action='mouse', x=110, y=400, dx=0, dy=150, steps=40); time.sleep(0.8)
-            h.ask('native', action='mouse', x=110, y=550, dx=0, dy=-150, steps=40); time.sleep(0.8)
+            # A row carried two rows and a bit down and back, so the order ends as it began.
+            h.ask('native', action='mouse', x=x, y=y, dx=0, dy=70, steps=40); time.sleep(0.8)
+            h.ask('native', action='mouse', x=x, y=y + 70, dx=0, dy=-70, steps=40); time.sleep(0.8)
+        x, y = row_at(h, 'Live page 1')
+        # The row really is carried: the order changes on the way down and
+        # is the same again on the way back — else the numbers are for nothing.
+        ids = lambda: [t['id'] for t in h.ask('tabs')['tabs']]
+        order = ids()
+        h.ask('native', action='mouse', x=x, y=y, dx=0, dy=70, steps=40); time.sleep(0.8)
+        moved = ids() != order
+        h.ask('native', action='mouse', x=x, y=y + 70, dx=0, dy=-70, steps=40); time.sleep(0.8)
+        took = moved and ids() == order
         out['dragging'] = hitches(h, 4, drag)
+        out['dragging']['tookHold'] = took
         h.ask('ui', folded=True); time.sleep(0.8)
         state = {'out': False}
         def slide():

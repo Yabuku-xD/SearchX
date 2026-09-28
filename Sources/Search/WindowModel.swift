@@ -617,16 +617,33 @@ final class WindowModel: ObservableObject, Identifiable {
             at = list.count
         }
         list.insert(tab, at: at)
-        tabs = list
-        if grouping { arrangeGroupedTabs() }
+        // Set once, grouped already: set twice, each set redrew the column.
+        tabs = grouping ? arranged(list) : list
         profile.rememberSession()
     }
 
     func arrangeGroupedTabs() {
-        let pins = tabs.filter { $0.pin != nil }
-        let grouped = tabGroups.flatMap { group in tabs.filter { $0.pin == nil && $0.groupID == group.id } }
-        let ungrouped = tabs.filter { $0.pin == nil && $0.groupID == nil }
-        tabs = pins + grouped + ungrouped
+        tabs = arranged(tabs)
+    }
+
+    /// Pins first, then each group's tabs in the groups' order, then the
+    /// tabs in no group; a tab of a group that's gone is left out.
+    private func arranged(_ list: [Tab]) -> [Tab] {
+        let pins = list.filter { $0.pin != nil }
+        let sections = sections(of: list)
+        return pins + tabGroups.flatMap { sections[$0.id] ?? [] } + (sections[nil] ?? [])
+    }
+
+    /// The tabs outside the pins, by the group each is in (nil: none), in
+    /// order — each tab's pin and group read once. `tabs(in:)` group after
+    /// group read every tab's again for every group; with a hundred and fifty
+    /// tabs in ten groups that was most of what each move of a drag cost.
+    func sections() -> [UUID?: [Tab]] { sections(of: tabs) }
+
+    private func sections(of list: [Tab]) -> [UUID?: [Tab]] {
+        var out: [UUID?: [Tab]] = [:]
+        for tab in list where tab.pin == nil { out[tab.groupID, default: []].append(tab) }
+        return out
     }
 
     func tabs(in group: UUID?) -> [Tab] {

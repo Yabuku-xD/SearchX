@@ -10,6 +10,20 @@ enum NativeProbe {
     /// How many drag moves the last "drag" posted, once it has let go.
     static var dragSent = 0
 
+    /// The window a probe's hand is about to press on, made key. A parked run
+    /// (SEARCH_PARK) stays behind whatever app is in front: activating it
+    /// took the keyboard from the person at the Mac for every drag of a
+    /// benchmark, and events posted into its own queue reach the window
+    /// without that.
+    static func forward(_ window: NSWindow?) {
+        if ProcessInfo.processInfo.environment["SEARCH_PARK"] != nil {
+            window?.makeKey()
+            return
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFront(nil)
+    }
+
     static func run(_ request: [String: Any], browser: Browser) -> [String: Any] {
         guard Store.testing else { return ["error": "test process required"] }
         if request["action"] as? String == "save" {
@@ -79,8 +93,7 @@ enum NativeProbe {
                 // system-wide throttling or display preferences.
                 window?.level = .floating
                 window?.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-                NSApp.activate(ignoringOtherApps: true)
-                window?.makeKeyAndOrderFront(nil)
+                NativeProbe.forward(window)
             }
             if request["reset"] as? Bool == true {
                 scrollMessages = 0
@@ -146,8 +159,7 @@ enum NativeProbe {
             guard let window, let x = request["x"] as? Double, let y = request["y"] as? Double else {
                 return ["error": "window and screen coordinates required"]
             }
-            NSApp.activate(ignoringOtherApps: true)
-            window.makeKeyAndOrderFront(nil)
+            NativeProbe.forward(window)
             var flags: NSEvent.ModifierFlags = []
             for flag in request["mods"] as? [String] ?? [] {
                 if flag == "cmd" { flags.insert(.command) }
@@ -176,8 +188,7 @@ enum NativeProbe {
             let hz = request["hz"] as? Double ?? 6
             let dx = request["dx"] as? Double ?? 520
             let dy = request["dy"] as? Double ?? 330
-            NSApp.activate(ignoringOtherApps: true)
-            window.makeKeyAndOrderFront(nil)
+            NativeProbe.forward(window)
             let origin = web.convert(NSPoint(x: x, y: web.isFlipped ? y : web.bounds.height - y), to: nil)
             func post(_ type: NSEvent.EventType, _ point: NSPoint) {
                 if let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
@@ -217,15 +228,25 @@ enum NativeProbe {
             guard let window, let content = window.contentView,
                   let x = request["x"] as? Double, let y = request["y"] as? Double
             else { return ["error": "window and x, y required"] }
-            NSApp.activate(ignoringOtherApps: true)
-            window.makeKeyAndOrderFront(nil)
+            NativeProbe.forward(window)
             let start = NSPoint(x: x, y: content.bounds.height - y)
+            // A parked window takes no events through the app's queue (see
+            // Bench "hit"): they go to the view under the press, as AppKit
+            // would have sent them there itself.
+            let parked = ProcessInfo.processInfo.environment["SEARCH_PARK"] != nil
+            let target: NSView? = parked ? content.superview.flatMap { $0.hitTest($0.convert(start, from: nil)) } : nil
             func post(_ type: NSEvent.EventType, _ point: NSPoint, clicks: Int = 1) {
                 if let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
                                                   timestamp: ProcessInfo.processInfo.systemUptime,
                                                   windowNumber: window.windowNumber, context: nil, eventNumber: 0,
                                                   clickCount: clicks, pressure: type == .leftMouseUp ? 0 : 1) {
-                    NSApp.postEvent(event, atStart: false)
+                    guard let target else { NSApp.postEvent(event, atStart: false); return }
+                    switch type {
+                    case .leftMouseDown: target.mouseDown(with: event)
+                    case .leftMouseDragged: target.mouseDragged(with: event)
+                    case .leftMouseUp: target.mouseUp(with: event)
+                    default: break
+                    }
                 }
             }
             if (request["clicks"] as? Int) == 2 {

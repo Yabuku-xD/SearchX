@@ -37,6 +37,9 @@ struct SideBar: View {
     /// A row or a heading picked up in the column, and where each one is.
     @State private var carrying: Carrying?
     @State private var itemFrames: [UUID: CGRect] = [:]
+    /// How tall the rows are, so their scroll view is no taller than they
+    /// are while they fit; nil until first measured.
+    @State private var rowsHeight: CGFloat?
     /// The lifted copy's own pill, apart from the one the live row wears.
     @Namespace private var lifted
     @State private var expandedBookmarks: Set<Bookmark.ID> = []
@@ -217,33 +220,38 @@ struct SideBar: View {
                     }
                     // A row too long for the window scrolls between the pins
                     // and the foot, rather than running under the lights at one
-                    // end and the foot at the other. While it fits it stays a
-                    // plain stack, and the space under it is still the
-                    // window's to be dragged by. Inside the page: the swipe
-                    // between spaces moves the page, scroll and all.
-                    ViewThatFits(in: .vertical) {
-                        rows
-                        ScrollViewReader { proxy in
-                            // The scroll view reaches into the margin on
-                            // the right and the rows keep it inside, so the
-                            // system's bar lands in the margin beside them
-                            // rather than over the cross on the tab under the
-                            // pointer. The column's edge lies over that margin
-                            // and answers first, so the bar never fights the
-                            // resize; the wheel and the trackpad still scroll.
-                            ScrollView(.vertical) {
-                                rows.padding(.trailing, 10)
-                            }
-                            .padding(.trailing, -10)
-                            // The tab you go to is the tab you see — ⌘1–⌘9,
-                            // ⇧⌘], a link opening beside the one on screen.
-                            .onChange(of: window.activeID) { _, id in
-                                guard let id else { return }
-                                proxy.scrollTo(id)
-                            }
-                            .onAppear {
-                                if let id = window.activeID { proxy.scrollTo(id, anchor: .center) }
-                            }
+                    // end and the foot at the other. While it fits the scroll
+                    // view is only as tall as the rows, and the space under it
+                    // is still the window's to be dragged by. Inside the page:
+                    // the swipe between spaces moves the page, scroll and all.
+                    //
+                    // One scroll view, sized to its rows: a ViewThatFits
+                    // choosing between the rows and the rows in a scroll view
+                    // kept both, and laid a long column out twice on every
+                    // pass — a hundred and fifty tabs, three hundred rows.
+                    ScrollViewReader { proxy in
+                        // The scroll view reaches into the margin on
+                        // the right and the rows keep it inside, so the
+                        // system's bar lands in the margin beside them
+                        // rather than over the cross on the tab under the
+                        // pointer. The column's edge lies over that margin
+                        // and answers first, so the bar never fights the
+                        // resize; the wheel and the trackpad still scroll.
+                        ScrollView(.vertical) {
+                            rows.padding(.trailing, 10)
+                                .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { rowsHeight = $0 }
+                        }
+                        .scrollBounceBehavior(.basedOnSize)
+                        .frame(maxHeight: rowsHeight ?? .infinity, alignment: .top)
+                        .padding(.trailing, -10)
+                        // The tab you go to is the tab you see — ⌘1–⌘9,
+                        // ⇧⌘], a link opening beside the one on screen.
+                        .onChange(of: window.activeID) { _, id in
+                            guard let id else { return }
+                            proxy.scrollTo(id)
+                        }
+                        .onAppear {
+                            if let id = window.activeID { proxy.scrollTo(id, anchor: .center) }
                         }
                     }
                 }
@@ -308,11 +316,19 @@ struct SideBar: View {
         let pinBlock = pinRows == 0 ? 0
             : CGFloat(pinRows) * pinHeight + CGFloat(pinRows - 1) * SideBar.pinGap + 10
         let visible = prefs.usesTabGroups
-            ? window.tabGroups.reduce(0) { $0 + window.visibleTabs(in: $1).count + 1 } + window.tabs(in: nil).count
+            ? visibleCount(window.sections())
             : window.tabs.count - pins
         let loose = CGFloat(visible) * (SideBar.row + SideBar.gap)
         let bookmarkBlock = showsBookmarks ? CGFloat(visibleBookmarkCount(bookmarks.roots)) * 31 + 42 : 0
         return prefs.topBarHeight + pinBlock + bookmarkBlock + loose + SideBar.row + 8
+    }
+
+    /// Headings and the rows under them that show, and the tabs in no group.
+    private func visibleCount(_ sections: [UUID?: [Tab]]) -> Int {
+        window.tabGroups.reduce(0) { count, group in
+            let members = sections[group.id] ?? []
+            return count + 1 + (group.collapsed ? members.filter { $0.id == window.activeID }.count : members.count)
+        } + (sections[nil]?.count ?? 0)
     }
 
     // MARK: - the pinned squares
@@ -467,21 +483,25 @@ struct SideBar: View {
         guard prefs.usesTabGroups else { return looseTabs.map(SideItem.row) }
         var items: [SideItem] = []
         let held: UUID? = carrying?.id
+        let sections = window.sections()
         for group in window.tabGroups {
-            items.append(.heading(group))
+            let members = sections[group.id] ?? []
+            items.append(.heading(group, members))
             // A group being carried folds its tabs under its heading.
             if held == group.id { continue }
-            let members = window.tabs(in: group.id)
             // Folded, it still shows the tab on screen, and the one in hand.
             items += (group.collapsed ? members.filter { $0.id == window.activeID || $0.id == held } : members)
                 .map(SideItem.row)
         }
-        items += window.tabs(in: nil).map(SideItem.row)
+        items += (sections[nil] ?? []).map(SideItem.row)
         return items
     }
 
     private var loose: some View {
-        VStack(spacing: SideBar.gap) {
+        // Lazy: a long column builds, lays out and draws the rows near
+        // where it's scrolled to, not all of them on every slide and switch.
+        // A row it hasn't built has no frame; see `firstBelow`.
+        LazyVStack(spacing: SideBar.gap) {
             ForEach(sideItems) { item in
                 item.view(window: window, prefs: prefs, pill: pill)
                     // Its place, kept open while it is in the hand.
@@ -522,13 +542,12 @@ struct SideBar: View {
                     carrying = Carrying(item: item, top: frame.minY, width: frame.width, height: frame.height)
                 }
                 carrying?.travel = value.translation.height
-                carrying?.across = value.translation.width
                 guard let carrying else { return }
                 let centre = carrying.top + carrying.travel + carrying.height / 2
                 withAnimation(Motion.settle) {
                     switch item {
                     case .row(let tab): place(tab, at: centre)
-                    case .heading(let group): place(group.id, at: centre)
+                    case .heading(let group, _): place(group.id, at: centre)
                     }
                 }
             }
@@ -555,7 +574,7 @@ struct SideBar: View {
     /// everything, the end of the tabs in no group.
     private func place(_ tab: Tab, at centre: CGFloat) {
         let items = sideItems.filter { $0.id != tab.id }
-        let next = items.firstIndex { (itemFrames[$0.id]?.midY ?? .infinity) > centre }
+        let next = firstBelow(centre, in: items.map(\.id))
         var group: UUID?
         var before: Tab?
         if let next {
@@ -563,10 +582,10 @@ struct SideBar: View {
             case .row(let other):
                 group = other.groupID
                 before = other
-            case .heading(let heading):
+            case .heading(let heading, let members):
                 let above = window.tabGroups.firstIndex { $0.id == heading.id }.flatMap { $0 > 0 ? window.tabGroups[$0 - 1] : nil }
                 group = above?.id ?? heading.id
-                before = above == nil ? window.tabs(in: heading.id).first { $0.id != tab.id } : nil
+                before = above == nil ? members.first { $0.id != tab.id } : nil
             }
         }
         if !prefs.usesTabGroups { group = tab.groupID }
@@ -583,14 +602,34 @@ struct SideBar: View {
         }
     }
 
+    /// The first of `ids`, in the list's order, whose middle is below
+    /// `centre`. The lazy list has frames only for the rows it has built,
+    /// a run from somewhere above the view to somewhere below it; the ones
+    /// before that run are higher than anything in hand can reach, and the
+    /// ones after it lower.
+    private func firstBelow(_ centre: CGFloat, in ids: [UUID]) -> Int? {
+        guard let first = ids.firstIndex(where: { itemFrames[$0] != nil }),
+              let last = ids.lastIndex(where: { itemFrames[$0] != nil }) else { return nil }
+        if let hit = ids[first...last].firstIndex(where: { (itemFrames[$0]?.midY ?? -.infinity) > centre }) {
+            return hit
+        }
+        return last + 1 < ids.count ? last + 1 : nil
+    }
+
     /// Where a carried heading's middle has reached: past the middle of
     /// each other group, heading and tabs together, it goes below that one.
     private func place(_ id: UUID, at centre: CGFloat) {
+        // A group the lazy list hasn't built lies wholly above the rows it
+        // has, or wholly below them (see `firstBelow`).
+        let order = sideItems.map(\.id)
+        let built = order.firstIndex { itemFrames[$0] != nil } ?? order.count
+        let sections = window.sections()
         let others = window.tabGroups.filter { $0.id != id }
         let target = others.filter { group in
-            let parts = [group.id] + window.visibleTabs(in: group).map(\.id)
+            let members = sections[group.id] ?? []
+            let parts = [group.id] + (group.collapsed ? members.filter { $0.id == window.activeID } : members).map(\.id)
             let frames = parts.compactMap { itemFrames[$0] }
-            guard let first = frames.first else { return false }
+            guard let first = frames.first else { return (order.firstIndex(of: group.id) ?? order.count) < built }
             return frames.dropFirst().reduce(first) { $0.union($1) }.midY < centre
         }.count
         guard window.tabGroups.firstIndex(where: { $0.id == id }) != target else { return }
@@ -1052,12 +1091,13 @@ extension EnvironmentValues {
 
 /// One line of the column's list: a group's heading, or a tab.
 private enum SideItem: Identifiable {
-    case heading(TabGroup)
+    /// A group's heading, with its tabs as they were when the list was made.
+    case heading(TabGroup, [Tab])
     case row(Tab)
 
     var id: UUID {
         switch self {
-        case .heading(let group): group.id
+        case .heading(let group, _): group.id
         case .row(let tab): tab.id
         }
     }
@@ -1065,8 +1105,8 @@ private enum SideItem: Identifiable {
     @MainActor @ViewBuilder
     func view(window: WindowModel, prefs: Preferences, pill: Namespace.ID) -> some View {
         switch self {
-        case .heading(let group):
-            GroupHeading(window: window, group: group, carried: true, members: window.tabs(in: group.id))
+        case .heading(let group, let members):
+            GroupHeading(window: window, group: group, carried: true, members: members)
         case .row(let tab):
             SideRow(window: window, prefs: prefs, tab: tab, live: tab.id == window.activeID,
                     pill: pill, close: { window.close(tab) })
@@ -1083,7 +1123,6 @@ private struct Carrying {
     let width: CGFloat
     let height: CGFloat
     var travel: CGFloat = 0
-    var across: CGFloat = 0
     var id: UUID? { item?.id }
 }
 

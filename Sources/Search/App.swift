@@ -438,7 +438,11 @@ struct ContentView: View {
         .environment(\.chromeBacking, windowTinted ? .desktop : .own)
         .ignoresSafeArea()
         .background(GeometryReader { geo in
-            Color.clear.onChange(of: geo.size.width, initial: true) { _, width in span = width }
+            // Past this width the panel is as wide as it wants to be (see
+            // panelWidth), so a resize there changes nothing it draws — and
+            // a width stored on every step of one ran this whole body again.
+            let cap = chrome.width + browser.prefs.panelWidth + 320
+            Color.clear.onChange(of: min(geo.size.width, cap), initial: true) { _, width in span = width }
         })
         .animation(browser.foldMotion, value: browser.prefs.sidebar)
         .animation(Motion.easeOut(0.12), value: window.active?.immersed)
@@ -912,6 +916,12 @@ struct ContentView: View {
 
     private func dress(_ host: NSWindow) {
         browser.claim(host, for: window)
+        // SwiftUI saves this window's frame to the preferences on every
+        // change of it, a round trip to cfprefsd and a read back each time:
+        // half of what a step of a resize cost, measured. The session keeps
+        // every window's frame already (WindowModel.frameRequest), so the
+        // scene's own copy goes.
+        host.setFrameAutosaveName("")
         if let frame = window.frameRequest {
             window.frameRequest = nil
             host.setFrame(frame, display: false)
