@@ -1497,6 +1497,15 @@ final class MiddleRelay: NSObject, WKScriptMessageHandler {
 
 /// A web view that reads the two-finger swipe for itself.
 final class PageView: WKWebView {
+    /// A parked test window (SEARCH_PARK) never becomes key, since the app
+    /// isn't brought forward over whoever is working; AppKit then spends a
+    /// page's first press on making it key and the page never sees it. Only
+    /// there does the page take that press as a click.
+    private static let parked = Store.testing && ProcessInfo.processInfo.environment["SEARCH_PARK"] != nil
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        PageView.parked || super.acceptsFirstMouse(for: event)
+    }
+
     /// What extensions added to the right-click menu, at the end of it.
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
