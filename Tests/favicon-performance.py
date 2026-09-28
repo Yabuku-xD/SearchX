@@ -24,6 +24,7 @@ import WebKit
 enum Store { static let folder = URL(fileURLWithPath: CommandLine.arguments[1]) }
 @MainActor final class Tab {
     var web = WKWebView()
+    var built: WKWebView? { web }
     var address: URL?
     var icon: NSImage?
     var shy = false
@@ -41,7 +42,7 @@ final class WeakImage {
     init(_ image: NSImage) { self.image = image }
 }
 @main struct Runner {
-    @MainActor static func main() throws {
+    @MainActor static func main() async throws {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
         app.appearance = NSAppearance(named: .aqua)
@@ -55,6 +56,22 @@ final class WeakImage {
                 weakImages[key] = WeakImage(image)
                 return true
             }
+        }
+        func ready(_ host: String) async -> NSImage? {
+            let deadline = Date().addingTimeInterval(10)
+            while Date() < deadline {
+                if let image = cache.cached(host) { return image }
+                try? await Task.sleep(nanoseconds: 1_000_000)
+            }
+            return nil
+        }
+        func resolve(_ count: Int) async -> [String: Any] {
+            let start = DispatchTime.now().uptimeNanoseconds
+            var found = 0
+            for key in 0..<count {
+                if await ready("host\(key).example") != nil, touch(key) { found += 1 }
+            }
+            return ["resolved": found, "milliseconds": Double(DispatchTime.now().uptimeNanoseconds - start) / 1e6]
         }
         func footprint() -> [String: Int] {
             var count = 0, bytes = 0
@@ -75,7 +92,8 @@ final class WeakImage {
             return ["resolved": found, "milliseconds": Double(DispatchTime.now().uptimeNanoseconds - start) / 1e6]
         }
         var report: [String: Any] = [:]
-        report["cold200"] = measure { (0..<200).filter { touch($0) }.count }
+        report["coldLookup200"] = measure { (0..<200).filter { touch($0) }.count }
+        report["coldCompletion200"] = await resolve(200)
         // Time public cache lookups without adding decode/instrumentation cost.
         report["hot2000"] = measure {
             var count = 0
@@ -87,14 +105,15 @@ final class WeakImage {
             return count
         }
         report["workingSet"] = footprint()
-        report["fill600"] = measure { (0..<600).filter { touch($0) }.count }
+        report["fill600"] = await resolve(600)
         report["overflow"] = footprint()
-        report["reload600"] = measure { (0..<600).filter { touch($0) }.count }
+        report["reload600"] = await resolve(600)
         report["afterReload"] = footprint()
         var large: [[String: Int]] = []
         for side in [512, 4096] {
+            let resolved = await ready("large\(side).example")
             autoreleasepool {
-                if let image = cache.cached("large\(side).example"),
+                if let image = resolved,
                    let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
                     large.append(["sourceSide": side, "decodedWidth": cg.width, "decodedHeight": cg.height,
                                   "decodedBackingBytes": cg.bytesPerRow * cg.height])

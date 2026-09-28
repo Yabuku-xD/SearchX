@@ -87,14 +87,21 @@ def process_sample(pid, web_pids):
             'contentCPUSeconds':sum(r['cpu'] for p,r in rows.items() if p!=pid)}
 
 
-def summary(intervals):
+def summary(intervals, target_hz):
     values = sorted(intervals)
+    if not values:
+        return {'frames': 0, 'targetHz': target_hz}
     def percentile(p):
         return values[round((len(values)-1)*p)]
-    return {'frames': len(values), 'fps': 1000/statistics.mean(values),
+    result = {'frames': len(values), 'fps': 1000/statistics.mean(values), 'targetHz': target_hz,
             'p50ms': percentile(.5), 'p95ms': percentile(.95), 'p99ms': percentile(.99),
             'over12_5msPercent': 100*sum(v>12.5 for v in values)/len(values),
             'over25msPercent': 100*sum(v>25 for v in values)/len(values)}
+    if target_hz:
+        budget = 1000 / target_hz
+        result.update(latePercent=100*sum(v>budget*1.5 for v in values)/len(values),
+                      missedFramePeriods=sum(max(0, round(v/budget)-1) for v in values))
+    return result
 
 
 def main():
@@ -210,7 +217,7 @@ def main():
                     native=run.ask('native',action='performance')
                     after=samples[-1]
                     result.update(state=state,iteration=iteration,process=samples,scrollMessages=native['scrollMessages'],native=native,
-                        summary=summary(result['intervals']),
+                        summary=summary(result['intervals'],native.get('pageTargetHz')),
                         appCPUPercent=100*(after['appCPUSeconds']-before['appCPUSeconds'])/(after['time']-before['time']),
                         contentCPUPercent=100*(after['contentCPUSeconds']-before['contentCPUSeconds'])/(after['time']-before['time']),
                         appRSSPeakMiB=max(s['appRSSKiB'] for s in samples)/1024,

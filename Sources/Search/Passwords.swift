@@ -111,7 +111,7 @@ struct PasswordsPanel: View {
         var body: some View {
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
-                    Mark(icon: Favicons.shared.cached(host), letter: host.first.map { String($0).uppercased() } ?? "•", size: 16)
+                    SiteMark(host: host, letter: host.first.map { String($0).uppercased() } ?? "•", size: 16)
                     Text(host)
                         .font(.system(size: 13))
                         .foregroundStyle(Palette.ink)

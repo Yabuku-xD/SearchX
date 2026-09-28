@@ -7,8 +7,8 @@ with its window see-through, ignoring the pointer and off every screen
 each: an animated page, a scrolling page, the folded sidebar sliding out and
 back, switching between tabs, and another tab loading. For each: the page's
 own frame intervals, and how late SearchX's main thread answered each
-display tick (NativeProbe "hitches") — every tick it misses is a frame the
-page and the chrome waited on.
+display tick (NativeProbe "hitches"). These are scheduling intervals against
+the configured target, not measurements of frames presented by the compositor.
 
 Needs the probes, which only a DEBUG build has. For numbers that mean
 something, build optimised with them:
@@ -92,9 +92,12 @@ long = ''.join(f'<p style="font:16px system-ui;margin:0;padding:10px 40px">Parag
 PAGES['/long'] = (f'<!doctype html><title>long</title><body style="margin:0">{long}</body>').encode() + FR + b'<script>let d=1;(function s(){scrollBy(0,18*d);if(scrollY+innerHeight>=document.body.scrollHeight-5)d=-1;if(scrollY<=0)d=1;requestAnimationFrame(s)})()</script>'
 for i in range(6):
     PAGES[f'/p{i}'] = (f'<!doctype html><title>p{i}</title><body style="margin:0;font:15px system-ui">' + ''.join(f'<div style="padding:8px 30px;border-bottom:1px solid #ddd">Row {j} of page {i} '+'x '*40+'</div>' for j in range(400)) + '</body>').encode()
-def stats(fr):
+def stats(fr, target_hz):
     if not fr: return {}
-    return {'n': len(fr), 'med': round(statistics.median(fr),1), 'late': sum(1 for x in fr if x > 12.5), 'bad': sum(1 for x in fr if x > 25), 'worst': round(max(fr),1)}
+    budget = 1000 / target_hz if target_hz else None
+    return {'n': len(fr), 'med': round(statistics.median(fr),1), 'targetHz': target_hz,
+            'late': sum(1 for x in fr if x > budget*1.5) if budget else None,
+            'bad': sum(1 for x in fr if x > budget*3) if budget else None, 'worst': round(max(fr),1)}
 def measure(h, tab, seconds, during=None):
     h.js(tab, 'window.frames_=[];true')
     h.ask('native', action='hitches', start=True)
@@ -104,7 +107,8 @@ def measure(h, tab, seconds, during=None):
         else: time.sleep(0.1)
     main = h.ask('native', action='hitches')
     fr = json.loads(h.js(tab, 'JSON.stringify(window.frames_)') or '[]')
-    return {'page': stats(fr), 'main': {k: (round(v,1) if isinstance(v,float) else v) for k,v in main.items() if k != 'seconds'}}
+    native = h.ask('native', action='performance')
+    return {'page': stats(fr, native.get('pageTargetHz')), 'main': {k: (round(v,1) if isinstance(v,float) else v) for k,v in main.items() if k != 'seconds'}}
 prefs = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
 h = Headless(sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] != '-' else None, prefs={'sidebar': True, 'sidebar.hides': True, **prefs})
 out = {}
@@ -133,4 +137,3 @@ try:
 finally:
     h.stop()
 print(json.dumps(out))
-

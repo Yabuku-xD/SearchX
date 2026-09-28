@@ -573,7 +573,10 @@ final class Tab: ObservableObject, Identifiable {
         Swipe.calm(web)
         web.onPull = { [weak self] pull in self?.pulling.pull = pull }
         web.leave = leave
-        web.onTouch = { [weak self] in self?.uncover() }
+        web.onTouch = { [weak self] in
+            guard let self, self.built?.unpainted == false else { return }
+            self.uncover()
+        }
         web.searchName = { [weak self] in self?.searchName?() }
         web.onSearch = { [weak self] text in
             guard let self else { return }
@@ -1148,12 +1151,17 @@ final class Tab: ObservableObject, Identifiable {
     func uncover(after delay: TimeInterval = 0) {
         guard let shown = cover else { return }
         guard delay > 0 else {
+            #if DEBUG
+            NativeProbe.navigation("uncover", tab: self)
+            #endif
             cover = nil
             return
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let self, self.cover === shown else { return }
-            self.cover = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak shown] in
+            guard let self, let shown, self.cover === shown, self.built?.unpainted != true else { return }
+            // Legacy WebKit without a first-frame signal starts opaque.
+            // A supported view still awaiting paint must keep its picture.
+            self.uncover()
         }
     }
 
@@ -1182,7 +1190,7 @@ final class Tab: ObservableObject, Identifiable {
     /// take — no error, no navigation, just a view that goes on sitting on
     /// about:blank with nothing left to say so. Still there, or still
     /// answering for a process that's already gone, is asked once more.
-    private func loadAndVerify(_ url: URL, state: Any? = nil, tries: Int = 0, extensionsReady: Bool = false) {
+    private func loadAndVerify(_ url: URL, state: Any? = nil, attached: Bool = false, extensionsReady: Bool = false) {
         // Wait for the stage to take the view back before loading into it. A
         // page loaded while its view is off any window boots as a hidden tab,
         // and a site that holds everything until it is shown — x.com does,
@@ -1194,10 +1202,10 @@ final class Tab: ObservableObject, Identifiable {
         // second, so a wake with no stage waiting for it still loads rather
         // than hanging on one that will never come.
         let view = web
-        if view.window == nil, tries < 50 {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { [weak self] in
-                guard let self, self.built === view, self.address == url, self.pending == nil else { return }
-                self.loadAndVerify(url, state: state, tries: tries + 1, extensionsReady: extensionsReady)
+        if view.window == nil, !attached {
+            view.afterAttachment { [weak self, weak view] in
+                guard let self, let view, self.built === view, self.address == url, self.pending == nil else { return }
+                self.loadAndVerify(url, state: state, attached: true, extensionsReady: extensionsReady)
             }
             return
         }
@@ -1205,7 +1213,7 @@ final class Tab: ObservableObject, Identifiable {
             Extensions.shared.afterStartup { [weak self, weak view] in
                 guard let self, let view, self.built === view,
                       self.address == url, self.pending == nil else { return }
-                self.loadAndVerify(url, state: state, tries: tries, extensionsReady: true)
+                self.loadAndVerify(url, state: state, attached: attached, extensionsReady: true)
             }
             return
         }
@@ -1274,6 +1282,9 @@ final class Tab: ObservableObject, Identifiable {
     @discardableResult
     func wake() -> Bool {
         guard let url = pending else { return false }
+        #if DEBUG
+        NativeProbe.navigation("wake", tab: self)
+        #endif
         pending = nil
         if SpeedDial.at(url) { return true }
         failure = nil
@@ -1596,9 +1607,31 @@ final class PageView: WKWebView {
         super.scrollWheel(with: event)
     }
 
+    private var attachment: (id: UUID, load: () -> Void)?
+
+    /// A foreground wake loads on attachment instead of polling every 20 ms.
+    /// Background callers still get the previous one-second fallback.
+    func afterAttachment(_ load: @escaping () -> Void) {
+        let id = UUID()
+        attachment = (id, load)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            self?.finishAttachment(id, allowDetached: true)
+        }
+    }
+
+    private func finishAttachment(_ id: UUID, allowDetached: Bool = false) {
+        guard let pending = attachment, pending.id == id, window != nil || allowDetached else { return }
+        attachment = nil
+        pending.load()
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window == nil { glide.stop() }
+        else if let id = attachment?.id {
+            // Leave AppKit's view insertion before starting WebKit navigation.
+            DispatchQueue.main.async { [weak self] in self?.finishAttachment(id) }
+        }
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -1679,10 +1712,10 @@ final class PageView: WKWebView {
 
     /// In, quickly: the page is there, and the fade only covers the frame
     /// between WebKit laying it out and putting it on screen.
-    func showFirstFrame() {
+    func showFirstFrame(animated: Bool = true) {
         guard unpainted else { return }
         unpainted = false
-        guard !Motion.reduced else { alphaValue = 1; return }
+        guard animated, !Motion.reduced else { alphaValue = 1; return }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.12
             animator().alphaValue = 1

@@ -152,7 +152,7 @@ enum PageFilters {
       return { steps: steps, action: action, watch: list.filter(function (t) { return t.op === 'watch-attr'; }).map(function (t) { return t.arg; }) };
     }
     function unique(list) { var out = [], seen = new Set(); list.forEach(function (n) { if (n && !seen.has(n)) { seen.add(n); out.push(n); } }); return out; }
-    function run(task, from) {
+    function* run(task, from) {
       var nodes = null;
       for (var i = 0; i < task.steps.length; i++) {
         var s = task.steps[i];
@@ -163,51 +163,55 @@ enum PageFilters {
             try { nodes = Array.from(from ? base.querySelectorAll(/^\s*[>+~]/.test(css) ? ':scope ' + css : css) : base.querySelectorAll(css)); } catch (e) { return []; }
           } else if (/^\s*[>+~\s]/.test(css)) {
             var next = [];
-            nodes.forEach(function (n) { try { next.push.apply(next, n.querySelectorAll(':scope ' + css.trim())); } catch (e) {} });
+            for (var n of nodes) { try { next.push.apply(next, n.querySelectorAll(':scope ' + css.trim())); } catch (e) {} yield; }
             // A sibling combinator reaches outside the node.
             if (/^\s*[+~]/.test(css)) {
               next = [];
-              nodes.forEach(function (n) { var p = n.parentElement; if (!p) return; try { p.querySelectorAll(':scope > ' + css.trim().replace(/^[+~]\s*/, '')).forEach(function (m) { if (css.trim()[0] === '+' ? n.nextElementSibling === m : (n.compareDocumentPosition(m) & 4)) next.push(m); }); } catch (e) {} });
+              for (var n of nodes) { var p = n.parentElement; if (!p) continue; try { for (var m of p.querySelectorAll(':scope > ' + css.trim().replace(/^[+~]\s*/, ''))) { if (css.trim()[0] === '+' ? n.nextElementSibling === m : (n.compareDocumentPosition(m) & 4)) next.push(m); yield; } } catch (e) {} yield; }
             }
             nodes = unique(next);
           } else {
-            nodes = nodes.filter(function (n) { try { return n.matches(css); } catch (e) { return false; } });
+            var matched = [];
+            for (var n of nodes) { try { if (n.matches(css)) matched.push(n); } catch (e) {} yield; }
+            nodes = matched;
           }
+          yield;
           continue;
         }
         if (nodes === null) nodes = from ? Array.from(from.querySelectorAll('*')) : Array.from(document.querySelectorAll('body *'));
+        var next = [];
+        for (var n of nodes) {
         switch (s.op) {
           case 'has-text': case 'contains': case '-abp-contains':
-            nodes = nodes.filter(function (n) { return s.test(n.textContent || ''); }); break;
+            if (s.test(n.textContent || '')) next.push(n); break;
           case 'min-text-length':
-            var min = parseInt(s.arg, 10) || 0; nodes = nodes.filter(function (n) { return (n.textContent || '').length >= min; }); break;
+            var min = parseInt(s.arg, 10) || 0; if ((n.textContent || '').length >= min) next.push(n); break;
           case 'upward': case 'nth-ancestor':
             var count = /^\d+$/.test(s.arg.trim()) ? parseInt(s.arg, 10) : 0;
-            nodes = unique(nodes.map(function (n) {
-              if (count) { var a = n; for (var k = 0; k < count && a; k++) a = a.parentElement; return a; }
-              try { return n.parentElement && n.parentElement.closest(s.arg); } catch (e) { return null; }
-            })); break;
+            if (count) { var a = n; for (var k = 0; k < count && a; k++) a = a.parentElement; if (a) next.push(a); }
+            else { try { var a = n.parentElement && n.parentElement.closest(s.arg); if (a) next.push(a); } catch (e) {} }
+            break;
           case 'xpath':
-            var found = [];
-            nodes.forEach(function (n) {
               try { var r = document.evaluate(s.arg, n, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
-                for (var k = 0; k < r.snapshotLength; k++) { var x = r.snapshotItem(k); if (x && x.nodeType === 1) found.push(x); } } catch (e) {}
-            });
-            nodes = unique(found); break;
+                for (var k = 0; k < r.snapshotLength; k++) { var x = r.snapshotItem(k); if (x && x.nodeType === 1) next.push(x); yield; } } catch (e) {}
+            break;
           case 'matches-css': case 'matches-css-before': case 'matches-css-after':
-            nodes = nodes.filter(function (n) { try { return s.test(String(getComputedStyle(n, s.pseudo).getPropertyValue(s.prop))); } catch (e) { return false; } }); break;
+            try { if (s.test(String(getComputedStyle(n, s.pseudo).getPropertyValue(s.prop)))) next.push(n); } catch (e) {} break;
           case 'matches-attr':
-            nodes = nodes.filter(function (n) { return Array.from(n.attributes).some(function (a) { return s.name(a.name) && (s.value === null || s.value(a.value)); }); }); break;
+            if (Array.from(n.attributes).some(function (a) { return s.name(a.name) && (s.value === null || s.value(a.value)); })) next.push(n); break;
           case 'matches-path':
-            if (!s.test(location.pathname + location.search)) nodes = []; break;
+            if (s.test(location.pathname + location.search)) next.push(n); break;
           case 'matches-media':
-            try { if (!matchMedia(s.arg).matches) nodes = []; } catch (e) { nodes = []; } break;
+            try { if (matchMedia(s.arg).matches) next.push(n); } catch (e) {} break;
           case 'has': case 'if': case '-abp-has':
-            nodes = nodes.filter(function (n) { return run(s.sub, n).length > 0; }); break;
+            if ((yield* run(s.sub, n)).length > 0) next.push(n); break;
           case 'not': case 'if-not':
-            nodes = nodes.filter(function (n) { return run(s.sub, n).length === 0; }); break;
-          case 'watch-attr': break;
+            if ((yield* run(s.sub, n)).length === 0) next.push(n); break;
+          case 'watch-attr': next.push(n); break;
         }
+        yield;
+        }
+        nodes = unique(next);
         if (!nodes.length) return [];
       }
       return nodes || [];
@@ -227,41 +231,55 @@ enum PageFilters {
     });
     function attach() { var root = document.head || document.documentElement; if (root && !sheet.isConnected) root.appendChild(sheet); }
     var shown = tasks.map(function () { return new Set(); });
-    function sweep() {
+    function* sweep() {
       attach();
-      tasks.forEach(function (t, i) {
-        var now = new Set(run(t, null));
+      for (var i = 0; i < tasks.length; i++) {
+        var t = tasks[i], now = new Set(yield* run(t, null));
         var type = t.action.type;
         if (type === 'hide' || type === 'style') {
           var attr = type === 'hide' ? mark : 'searchx-style-' + i;
-          shown[i].forEach(function (n) { if (!now.has(n)) n.removeAttribute(attr); });
-          now.forEach(function (n) { if (!n.hasAttribute(attr)) n.setAttribute(attr, ''); });
+          for (var n of shown[i]) { if (!now.has(n)) n.removeAttribute(attr); yield; }
+          for (var n of now) { if (n.isConnected && !n.hasAttribute(attr)) n.setAttribute(attr, ''); yield; }
           shown[i] = now;
         } else if (type === 'remove') {
-          now.forEach(function (n) { n.remove(); });
+          for (var n of now) { n.remove(); yield; }
         } else if (type === 'remove-attr' || type === 'remove-class') {
           var test = needle(t.action.arg.replace(/^"|"$/g, ''));
-          now.forEach(function (n) {
+          for (var n of now) {
             if (type === 'remove-attr') Array.from(n.attributes).forEach(function (a) { if (test(a.name)) n.removeAttribute(a.name); });
             else Array.from(n.classList).forEach(function (c) { if (test(c)) n.classList.remove(c); });
-          });
+            yield;
+          }
         }
-      });
+      }
     }
-    var queued = false, last = 0;
+    // uBO's DOM survey uses a 4 ms slice. At 120 Hz this leaves over half
+    // the frame for the page. Yield within selectors as well as between
+    // rules, and resume every rule; an expensive filter is never disabled.
+    var queued = false, last = 0, work = null, dirty = false;
+    function chunk() {
+      queued = false;
+      if (!work) { dirty = false; last = Date.now(); work = sweep(); }
+      var deadline = performance.now() + 4, step;
+      do { step = work.next(); } while (!step.done && performance.now() < deadline);
+      if (!step.done) { queued = true; requestAnimationFrame(chunk); return; }
+      work = null;
+      if (dirty) soon();
+    }
     function soon() {
+      dirty = true;
       if (queued) return;
       queued = true;
       var wait = Math.max(0, 120 - (Date.now() - last));
-      setTimeout(function () { requestAnimationFrame(function () { queued = false; last = Date.now(); sweep(); }); }, wait);
+      setTimeout(function () { requestAnimationFrame(chunk); }, wait);
     }
     var watched = [];
     tasks.forEach(function (t) { t.watch.forEach(function (w) { w.split(',').forEach(function (a) { if (a.trim()) watched.push(a.trim()); }); }); });
     function start() {
-      sweep();
       var options = { subtree: true, childList: true, characterData: true };
       if (watched.length) { options.attributes = true; options.attributeFilter = watched; }
       new MutationObserver(soon).observe(document.documentElement, options);
+      soon();
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true }); else start();
     """#

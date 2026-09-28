@@ -55,6 +55,8 @@ Pick any picture and SearchX redraws it as pixel art in the picture's own colour
 ### ⚡ Motion that keeps up
 Pages run at 120 Hz on ProMotion displays when you allow it. A mouse wheel glides like Chrome's, one eased curve per notch, while trackpads and mouse tools that already smooth, like LinearMouse or Mos, are left exactly as you set them. Scroll bars stay hidden until you scroll. The sidebar folds away and slides back from the edge, with adjustable delay and speed, and stays quick with 150 tabs: typing, switching tabs and sliding it out redraw only the rows that change.
 
+Settings uses a faster native mouse wheel step. A sleeping tab keeps its saved picture until the new page paints, then fades it away and releases the image. Page complexity, video decoding and the display still determine the frame rate; SearchX cannot guarantee a fixed rate or flat resource use for every site.
+
 </td>
 <td valign="top">
 
@@ -117,9 +119,13 @@ SearchX follows the Mac's language, including a per-app choice in System Setting
 
 Also: one field for addresses and searches with the engine you choose, bookmarks with folders and a bar, history, downloads, Speed Dial, element screenshots, site apps, editable shortcuts, light and dark appearance, and signed updates that install only when you say so.
 
+The address field offers local history immediately and optional query completions from your selected search provider. Arrow keys choose a suggestion; Return searches for it. Suggestions are on for supported providers and can be turned off in Settings › General. Private windows, addresses, email addresses and site shortcuts stay out of suggestion requests. Supported endpoints are defined in [SearchSuggestions.swift](Sources/Search/SearchSuggestions.swift); unsupported engines keep local history and direct search.
+
 ## Privacy, by design
 
-> No sync. No account. No telemetry. No server.
+> No sync. No account. No telemetry. No SearchX server.
+
+When search suggestions are on, typed search words go directly to the selected provider. These requests do not include browsing history, browser cookies or stored credentials, and SearchX does not save the responses to disk.
 >
 > The only things that leave your Mac are the pages you ask for, their icons, the filter lists, and one small request a day to see whether there's a newer version.
 
@@ -128,12 +134,12 @@ Also: one field for addresses and searches with the engine you choose, bookmarks
 
 <br>
 
-| What | Where | Who can read it |
-|---|---|---|
-| Passwords | The macOS login keychain, as items tagged `Search` | SearchX, by its signature. Any other app triggers the system's permission dialog. |
-| History, bookmarks, open tabs, hidden elements | Small JSON files in `~/Library/Application Support/Search/` | You. |
-| Cookies and site data | WebKit's own store for the app | The sites that set them. |
-| Extensions | `~/Library/Application Support/Search/Extensions/` and WebKit's extension store | Each extension, within the permissions you accepted. |
+| What                                           | Where                                                                           | Who can read it                                                                   |
+| ---                                            | ---                                                                             | ---                                                                               |
+| Passwords                                      | The macOS login keychain, as items tagged `Search`                              | SearchX, by its signature. Any other app triggers the system's permission dialog. |
+| History, bookmarks, open tabs, hidden elements | Small JSON files in `~/Library/Application Support/Search/`                     | You.                                                                              |
+| Cookies and site data                          | WebKit's own store for the app                                                  | The sites that set them.                                                          |
+| Extensions                                     | `~/Library/Application Support/Search/Extensions/` and WebKit's extension store | Each extension, within the permissions you accepted.                              |
 
 A private window (`⇧⌘N`) keeps its own temporary cookie jar and stays out of history and saved sessions.
 
@@ -144,16 +150,16 @@ A private window (`⇧⌘N`) keeps its own temporary cookie jar and stays out of
 
 <br>
 
-| Browse | Tabs | Tools |
-|---|---|---|
-| `⌘L` address | `⌘T` new tab | `⇧⌘R` reading mode |
-| `⌘[` `⌘]` back, forward | `⌘W` close | `⇧⌘P` float the video |
-| `⌘F` find · `⌘.` stop | `⇧⌘T` reopen | `⇧⌘H` hide something |
-| `⇧⌘C` copy address | `⌘K` tabs and commands | `⇧⌘U` what's hidden |
-| `⇧⌘V` paste and go | `⇧⌘[` `⇧⌘]` or `⌥⌘←` `⌥⌘→` previous, next | `⌘D` bookmark · `⇧⌘B` bookmarks bar |
-| `⌘Y` history | `⌘1`–`⌘9` jump | `⌥⌘L` passwords |
-| `⇧⌘J` downloads | `⇧⌘D` duplicate · `⇧⌘W` close window | `⌘,` settings |
-| | `⇧⌘S` top or side · `⌘S` fold | `⇧⌘F` focus mode |
+| Browse                  | Tabs                                      | Tools                               |
+| ---                     | ---                                       | ---                                 |
+| `⌘L` address            | `⌘T` new tab                              | `⇧⌘R` reading mode                  |
+| `⌘[` `⌘]` back, forward | `⌘W` close                                | `⇧⌘P` float the video               |
+| `⌘F` find · `⌘.` stop   | `⇧⌘T` reopen                              | `⇧⌘H` hide something                |
+| `⇧⌘C` copy address      | `⌘K` tabs and commands                    | `⇧⌘U` what's hidden                 |
+| `⇧⌘V` paste and go      | `⇧⌘[` `⇧⌘]` or `⌥⌘←` `⌥⌘→` previous, next | `⌘D` bookmark · `⇧⌘B` bookmarks bar |
+| `⌘Y` history            | `⌘1`–`⌘9` jump                            | `⌥⌘L` passwords                     |
+| `⇧⌘J` downloads         | `⇧⌘D` duplicate · `⇧⌘W` close window      | `⌘,` settings                       |
+|                         | `⇧⌘S` top or side · `⌘S` fold             | `⇧⌘F` focus mode                    |
 
 Every binding can be changed in Settings › Shortcuts. The defaults live in [Shortcuts.swift](Sources/Search/Shortcuts.swift).
 
@@ -197,24 +203,24 @@ open build/SearchX.app
 
 SwiftUI draws the interface, AppKit handles the window chrome, and WKWebView shows pages. There are no package dependencies beyond what Apple ships, and `Sources/Search/` keeps one file per concern:
 
-| File | Job |
-|---|---|
-| `Shield.swift`, `Filters.swift` | Blocking |
+| File                                                                         | Job                                                                        |
+| ---                                                                          | ---                                                                        |
+| `Shield.swift`, `Filters.swift`                                              | Blocking                                                                   |
 | `OwnFilters.swift`, `PageFilters.swift`, `RuleMatch.swift`, `BlockLog.swift` | Your filters and rules, what SearchX does beyond WebKit's blocker, the log |
-| `Protected.swift` | The sign-in, passkey, captcha and payment pages nothing new touches |
-| `Protections.swift` | Fingerprinting protection and Compatibility Mode |
-| `Passkeys.swift`, `Little.swift` | Passkeys, and the small windows sign-in pop-ups open in |
-| `FilterCompiler.swift`, `FilterWorker.swift` | Compiling filter lists in a short-lived helper process |
-| `Scriptlets.swift`, `Intent.swift` | Scriptlets and behaviour-based pop-up blocking |
-| `Wallpaper.swift`, `PixelArt.swift`, `Beam.swift` | The new tab picture and the address field light |
-| `QuickCommands.swift`, `Chains.swift` | ⌘K's commands and command chains |
-| `Split.swift`, `SplitStage.swift` | Split view of up to four pages |
-| `WebPanels.swift`, `Containers.swift`, `SavedGroups.swift` | Web panels, containers and saved groups |
-| `Power.swift`, `Sleep.swift`, `WheelGlide.swift` | Saving power, sleeping tabs and smooth wheel scrolling |
-| `Vault.swift` | The keychain |
-| `Extensions.swift`, `ExtensionShims.swift` | Chrome extensions |
-| `Session.swift` | What comes back at launch |
-| `Updater.swift` | Signed updates |
+| `Protected.swift`                                                            | The sign-in, passkey, captcha and payment pages nothing new touches        |
+| `Protections.swift`                                                          | Fingerprinting protection and Compatibility Mode                           |
+| `Passkeys.swift`, `Little.swift`                                             | Passkeys, and the small windows sign-in pop-ups open in                    |
+| `FilterCompiler.swift`, `FilterWorker.swift`                                 | Compiling filter lists in a short-lived helper process                     |
+| `Scriptlets.swift`, `Intent.swift`                                           | Scriptlets and behaviour-based pop-up blocking                             |
+| `Wallpaper.swift`, `PixelArt.swift`, `Beam.swift`                            | The new tab picture and the address field light                            |
+| `QuickCommands.swift`, `Chains.swift`                                        | ⌘K's commands and command chains                                           |
+| `Split.swift`, `SplitStage.swift`                                            | Split view of up to four pages                                             |
+| `WebPanels.swift`, `Containers.swift`, `SavedGroups.swift`                   | Web panels, containers and saved groups                                    |
+| `Power.swift`, `Sleep.swift`, `WheelGlide.swift`                             | Saving power, sleeping tabs and smooth wheel scrolling                     |
+| `Vault.swift`                                                                | The keychain                                                               |
+| `Extensions.swift`, `ExtensionShims.swift`                                   | Chrome extensions                                                          |
+| `Session.swift`                                                              | What comes back at launch                                                  |
+| `Updater.swift`                                                              | Signed updates                                                             |
 
 [PORTING.md](PORTING.md) describes the early Linux port.
 
@@ -238,17 +244,25 @@ Turn on Settings › General › Let a script drive SearchX, and `./bench` drive
 
 Each end-to-end check runs its own temporary app and profile, and saves screenshots and a JSON report:
 
-| Command | What it checks |
-|---|---|
-| `python3 Tests/local-resolution.py core` | Windows, tabs, sessions and the address field |
-| `python3 Tests/audit-features.py` | ⌘K, chains, focus, power, panels, splits, groups, containers |
-| `python3 Tests/wheel-glide.py` | Wheel glide; trackpads and mouse tools left alone |
-| `python3 Tests/blocker.py` | Your filters and rules, the log, protected pages |
-| `python3 Tests/popup-live.py` | Pop-ups on live sites, blocker on, lists off and off |
-| `python3 Tests/smoothness.py` | Scrolling, sidebar slides and tab switches, frame by frame |
-| `python3 Tests/sidebar-scale.py` | The same with 150 tabs, plus typing and resizing |
-| `python3 Tests/group-motion.py` | A group folding and unfolding, filmed frame by frame |
-| `python3 Tests/weigh.py` | The numbers at the top of this page |
+| Command                                             | What it checks                                                                       |
+| ---                                                 | ---                                                                                  |
+| `python3 Tests/local-resolution.py core`            | Windows, tabs, sessions and the address field                                        |
+| `python3 Tests/local-resolution.py suggestions`     | Provider completions, keyboard selection, cancellation, opt-out and private browsing |
+| `python3 Tests/local-resolution.py wake`            | Slow first paint, screenshot handoff and release after the fade                      |
+| `python3 Tests/local-resolution.py settings-scroll` | Faster native wheel scrolling within Settings                                        |
+| `python3 Tests/local-resolution.py forms-churn`     | Form detection and autofill during a changing document, with scan timings            |
+| `python3 Tests/audit-features.py`                   | ⌘K, chains, focus, power, panels, splits, groups, containers and queued sleep        |
+| `python3 Tests/wheel-glide.py`                      | Wheel glide, nested player menus and cancellation; continuous input passes through   |
+| `python3 Tests/blocker.py`                          | Your filters and rules, large procedural results, the log and protected pages        |
+| `python3 Tests/popup-live.py`                       | Pop-ups on live sites, blocker on, lists off and off                                 |
+| `python3 Tests/smoothness.py`                       | Scrolling, sidebar slides and tab switches, frame by frame                           |
+| `python3 Tests/sidebar-scale.py`                    | The same with 150 tabs, plus typing and resizing                                     |
+| `python3 Tests/group-motion.py`                     | A group folding and unfolding, filmed frame by frame                                 |
+| `python3 Tests/weigh.py`                            | The numbers at the top of this page                                                  |
+
+Performance probes report callback cadence separately from the display or configured page target. Their frame timings are scheduling measurements, not a count of frames physically presented by the display. The icon cache benchmark (`python3 Tests/favicon-performance.py`) separates time spent requesting cold icons on the UI thread from the time needed to finish loading them.
+
+For an invisible performance run, the probe refreshes the owned window's visibility state after disabling occlusion detection for the measured page. Confirm `document.hidden` is false and that animation callbacks arrive before using its timings. Video playback quality and GPU memory need separate measurements; a page's animation callback rate does not establish smooth video presentation.
 
 </details>
 

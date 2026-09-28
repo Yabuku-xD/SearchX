@@ -250,7 +250,7 @@ struct Fold: View {
     /// and after a few quick opens and closes the column stayed open, or the
     /// edge stopped opening it.
     private func follow() {
-        guard folding, let host = pointer.window, host.isVisible else { return pass() }
+        guard folding, let host = pointer.window, host.isVisible, !host.ignoresMouseEvents else { return pass() }
         let screen = NSEvent.mouseLocation
         let point = host.convertPoint(fromScreen: screen)
         let size = host.frame.size

@@ -24,9 +24,13 @@ from http.server import ThreadingHTTPServer
 
 ROOT = Path(__file__).resolve().parents[1]
 HELPERS = runpy.run_path(str(ROOT / "Tests/chrome_support.py"))
+parser = argparse.ArgumentParser()
+parser.add_argument("--binary", default=str(ROOT / ".build/debug/Search"))
+parser.add_argument("--output", type=Path)
+args = parser.parse_args()
 server = ThreadingHTTPServer(("127.0.0.1", 0), HELPERS["PageHandler"])
 threading.Thread(target=server.serve_forever, daemon=True).start()
-run = HELPERS["Run"](argparse.Namespace(binary=str(ROOT / ".build/debug/Search"),
+run = HELPERS["Run"](argparse.Namespace(binary=args.binary,
                                      world="audit-" + uuid.uuid4().hex[:8]),
                      f"http://127.0.0.1:{server.server_port}")
 origin = run.origin
@@ -128,6 +132,30 @@ try:
     state = wait(lambda: audit("groupAct", group=group, act="sleep"),
                  lambda s: all(t["asleep"] for t in s["tabs"] if t["group"] == group), "Put Group to Sleep")
     run.check(True, "Put Group to Sleep lets every page in it go")
+
+    # A burst of duplicate group actions, with a queued tab picked and another
+    # closed before its turn. Waking the group must still recover its pages.
+    batch = [run.open('/sleep-queue-' + str(i)) for i in range(12)]
+    state = audit('group', ids=batch)
+    queued_group = state['groups'][-1]['id']
+    run.ask('select', id=ids['e'])
+    audit('groupAct', group=queued_group, act='sleep')
+    audit('groupAct', group=queued_group, act='sleep')
+    run.ask('select', id=batch[-1])
+    audit('close', id=batch[-2])
+    state = wait(lambda: audit('state'),
+                 lambda s: all(t['asleep'] for t in s['tabs'] if t['id'] in batch[:-2]),
+                 'queued background pages sleep')
+    run.check(not next(t for t in state['tabs'] if t['id'] == batch[-1])['asleep'],
+              'a queued tab selected before its turn stays awake')
+    run.check(run.js(batch[-1], 'document.querySelector("#identity").textContent') == '/sleep-queue-11',
+              'selected page remains interactive after the sleep burst')
+    run.ask('select', id=batch[0])
+    run.page(batch[0], '/sleep-queue-0')
+    run.check(True, 'queued sleeping page wakes to its original address')
+    run.ask('select', id=ids['e'])
+    for member in batch:
+        if member != batch[-2]: audit('close', id=member)
     state = audit("groupAct", group=group, act="pin")
     pinned = [t for t in state["tabs"] if t["id"] in (ids["a"], ids["b"])]
     run.check(all(t["pin"] for t in pinned) and all(g["id"] != group for g in state["groups"]),
@@ -260,6 +288,7 @@ finally:
     run.stop()
     server.shutdown()
     server.server_close()
-    report = run.directory / "audit-features.json"
+    report = args.output or run.directory / "audit-features.json"
+    report.parent.mkdir(parents=True, exist_ok=True)
     report.write_text(json.dumps(run.report, indent=2))
     print(f"Report: {report}", flush=True)

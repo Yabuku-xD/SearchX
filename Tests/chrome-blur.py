@@ -15,10 +15,13 @@ import uuid
 from http.server import ThreadingHTTPServer
 
 ROOT = Path(__file__).resolve().parents[1]
+parser = argparse.ArgumentParser()
+parser.add_argument('--binary', default=str(ROOT / '.build/debug/Search'))
+args = parser.parse_args()
 HELPERS = runpy.run_path(str(ROOT / "tests/chrome_support.py"))
 server = ThreadingHTTPServer(("127.0.0.1", 0), HELPERS["PageHandler"])
 threading.Thread(target=server.serve_forever, daemon=True).start()
-run = HELPERS["Run"](argparse.Namespace(binary=str(ROOT / ".build/debug/Search"),
+run = HELPERS["Run"](argparse.Namespace(binary=args.binary,
                                      world="blur-" + uuid.uuid4().hex[:8]),
                      f"http://127.0.0.1:{server.server_port}")
 try:

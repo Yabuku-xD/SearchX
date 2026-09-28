@@ -1,10 +1,8 @@
 import SwiftUI
 import AppKit
 
-/// One field, in the middle, and the few places it thinks you mean. It takes
-/// addresses and only addresses: type something that isn't a place and it
-/// shivers and says so, rather than quietly handing your keystrokes to a
-/// search engine.
+/// One field for addresses and searches, with local history immediately
+/// below it and optional provider completions arriving afterward.
 struct Omnibox: View {
     @ObservedObject var window: WindowModel
     /// What typing changes: the text, the list, the grey ending, the row
@@ -165,16 +163,18 @@ struct Omnibox: View {
                     // typed for a site you've been to before doesn't need to
                     // say so with a magnifying glass. Nothing is fetched for
                     // one that isn't; the glass is what a row wears until then.
-                    if let host = offer.url.host()?.lowercased(), let icon = Favicons.shared.cached(host) {
-                        Image(nsImage: icon)
-                            .resizable()
-                            .interpolation(.high)
-                            .frame(width: 14, height: 14)
-                            .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
-                    } else {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(Palette.muted)
+                    CachedIcon(host: offer.url.host()?.lowercased() ?? "") { icon in
+                        if let icon {
+                            Image(nsImage: icon)
+                                .resizable()
+                                .interpolation(.high)
+                                .frame(width: 14, height: 14)
+                                .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+                        } else {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(Palette.muted)
+                        }
                     }
                 case .open:
                     // Already open: naming it takes you back to it rather than
@@ -404,7 +404,7 @@ struct AddressField: NSViewRepresentable {
         if want != coordinator.synced {
             coordinator.synced = want
             field.stringValue = want
-            coordinator.select(from: window.typed.count, in: field)
+            coordinator.select(from: window.typed.utf16.count, in: field)
         }
 
         if coordinator.answered != window.focusRequest {
@@ -474,7 +474,7 @@ struct AddressField: NSViewRepresentable {
 
             field.stringValue = text + ending
             synced = field.stringValue
-            select(from: text.count, in: field)
+            select(from: text.utf16.count, in: field)
         }
 
         /// The part after the caret, shown as selected, so the next keystroke
@@ -485,7 +485,9 @@ struct AddressField: NSViewRepresentable {
                 .backgroundColor: NSColor(Palette.ink.opacity(0.12)),
                 .foregroundColor: Palette.NS.ink,
             ]
-            let length = field.stringValue.count
+            // NSTextView ranges use UTF-16 offsets, including emoji and
+            // combining characters in typed searches and completions.
+            let length = field.stringValue.utf16.count
             guard start <= length else { return }
             editor.selectedRange = NSRange(location: start, length: length - start)
         }
@@ -522,7 +524,7 @@ extension AddressField {
     /// What the empty field says: an address, or on ⌘K everything it finds.
     static func placeholder(summoning: Bool) -> NSAttributedString {
         NSAttributedString(
-            string: (summoning ? "Search tabs, bookmarks and commands" : "Enter a web address").saidNow,
+            string: (summoning ? "Search tabs, bookmarks and commands" : "Search or enter a web address").saidNow,
             attributes: [
                 .font: NSFont.systemFont(ofSize: 15.5),
                 .foregroundColor: NSColor(Palette.ink.opacity(0.3)),

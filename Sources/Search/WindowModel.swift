@@ -92,6 +92,7 @@ final class WindowModel: ObservableObject, Identifiable {
     var typed = "" { willSet { field.objectWillChange.send() } didSet { guess() } }
     /// What the field is offering, best first.
     private(set) var offers: [Suggestion] = [] { willSet { field.objectWillChange.send() } }
+    private var suggesting: Task<Void, Never>?
     /// The rest of the best match, drawn grey after the caret. Tab takes it.
     private(set) var ending: String? { willSet { field.objectWillChange.send() } }
     /// Which row the arrow keys have walked to, if any.
@@ -177,7 +178,14 @@ final class WindowModel: ObservableObject, Identifiable {
         profile.objectWillChange
             .sink { [weak self] in self?.objectWillChange.send() }
             .store(in: &bag)
+        profile.prefs.$engine.combineLatest(profile.prefs.$searchSuggestions)
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.guess() }
+            .store(in: &bag)
     }
+
+    deinit { suggesting?.cancel() }
 
     // MARK: - tabs
 
@@ -1148,6 +1156,8 @@ final class WindowModel: ObservableObject, Identifiable {
     }
 
     private func guess() {
+        suggesting?.cancel()
+        suggesting = nil
         guard !summoning else {
             offers = quickOffers(for: typed)
             ending = nil
@@ -1189,6 +1199,45 @@ final class WindowModel: ObservableObject, Identifiable {
         // A row that was picked stops being the right row the moment the
         // question changes.
         picked = nil
+        suggestSearches()
+    }
+
+    private func suggestSearches() {
+        let query = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        let engine = profile.prefs.engine
+        guard fieldShowing, !isPrivate, active?.shy != true, profile.prefs.searchSuggestions,
+              !summoning, !offers.contains(where: { $0.kind.isCommand }),
+              Keyword.match(typed, in: profile.prefs.keywords) == nil,
+              SearchSuggestions.accepts(query), SearchSuggestions.template(for: engine) != nil else { return }
+        let input = typed
+        let tab = activeID
+        suggesting = Task { [weak self] in
+            do {
+                // Let a burst of keystrokes finish without delaying local
+                // history or sending a request for every character.
+                try await Task.sleep(for: .milliseconds(150))
+                guard self?.wantsSuggestions(input: input, engine: engine, tab: tab) == true else { return }
+                let phrases = try await SearchSuggestions.fetch(query, engine: engine)
+                try Task.checkCancellation()
+                guard let self, self.wantsSuggestions(input: input, engine: engine, tab: tab) else { return }
+                var seen = Set(self.offers.map { $0.key.lowercased() })
+                let more = phrases.compactMap { phrase -> Suggestion? in
+                    guard seen.insert(phrase.lowercased()).inserted,
+                          let url = Engine.url(for: phrase, template: engine.template(custom: "")) else { return nil }
+                    return Suggestion(key: phrase, title: engine.title, url: url, kind: .search)
+                }
+                // Append only: neither an existing selection nor the text
+                // in the field changes when the network answers.
+                self.offers.append(contentsOf: more)
+            } catch {
+                // A failed or cancelled suggestion never interrupts typing.
+            }
+        }
+    }
+
+    private func wantsSuggestions(input: String, engine: Engine, tab: Tab.ID?) -> Bool {
+        typed == input && activeID == tab && fieldShowing && !summoning && !isPrivate && active?.shy != true
+            && profile.prefs.searchSuggestions && profile.prefs.engine == engine
     }
 
     /// What is open, most recently looked at first, filtered by what has been

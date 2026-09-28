@@ -80,6 +80,7 @@ final class Passkeys: NSObject {
     private var token: String?
     private var answer: (([String: Any]) -> Void)?
     private weak var anchor: NSWindow?
+    var isPresenting: Bool { controller != nil || Self.waiting != nil }
     /// Called off by its page before it could start.
     private var withdrawn: String?
 

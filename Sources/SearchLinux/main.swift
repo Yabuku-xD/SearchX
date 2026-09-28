@@ -15,5 +15,6 @@ on(raw(application), "activate") {
     browser = Browser(application: application)
 }
 let status = g_application_run(search_application(raw(application)), CommandLine.argc, CommandLine.unsafeArgv)
+Session.flush()
 g_object_unref(raw(application))
 exit(status)

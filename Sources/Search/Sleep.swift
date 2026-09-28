@@ -78,6 +78,9 @@ extension Browser {
         if tab.floating || floating == tab.id { return "its video is out" }
         if web.cameraCaptureState != .none || web.microphoneCaptureState != .none { return "on a call" }
         if downloading.contains(where: { $0.webView === web }) { return "downloading" }
+        if Passkeys.shared.isPresenting { return "using a passkey" }
+        if LittleWindow.holding(tab) != nil { return "in a separate window" }
+        if LittleWindow.all.contains(where: { $0.tab.opener == tab.id }) { return "has an open popup" }
         // A sign-in window hands its answer back to the page that opened it.
         if tab.owner?.active?.opener == tab.id { return "the page on screen came from it" }
         return nil
@@ -87,29 +90,77 @@ extension Browser {
     /// it go — looking again at each step, since each takes a moment and you
     /// may have gone back to the tab in the meantime.
     func sleep(_ tab: Tab, manually: Bool = false, done: ((String) -> Void)? = nil) {
-        if let reason = awake(because: tab, manually: manually) {
-            done?(reason)
+        sleepQueue.enqueue(tab, manually: manually, done: done)
+    }
+}
+
+/// One snapshot pipeline at a time, including JPEG encoding. Memory pressure
+/// must not start a full-size surface allocation for every resting page at once.
+@MainActor
+final class SleepQueue {
+    @MainActor private final class Job {
+        weak var tab: Tab?
+        weak var page: WKWebView?
+        let touched: Date
+        var manually: Bool
+        var completions: [(String) -> Void] = []
+        init(_ tab: Tab, manually: Bool) {
+            self.tab = tab
+            page = tab.built
+            touched = tab.touched
+            self.manually = manually
+        }
+    }
+    private weak var browser: Browser?
+    private var pending: [Job] = []
+    private var running: Job?
+
+    init(browser: Browser) { self.browser = browser }
+
+    func enqueue(_ tab: Tab, manually: Bool, done: ((String) -> Void)?) {
+        guard let browser else { done?("browser closed"); return }
+        if let reason = browser.awake(because: tab, manually: manually) { done?(reason); return }
+        if let job = (running?.tab === tab ? running : nil) ?? pending.first(where: { $0.tab === tab }) {
+            job.manually = job.manually || manually
+            if let done { job.completions.append(done) }
             return
         }
-        tab.unsaved { [weak self, weak tab] typed in
-            guard let self, let tab else { return }
-            if typed {
-                done?("holding something typed")
-                return
-            }
-            if let reason = self.awake(because: tab, manually: manually) {
-                done?(reason)
-                return
-            }
-            tab.snapshot { [weak self, weak tab] picture in
-                guard let self, let tab else { return }
-                if let reason = self.awake(because: tab, manually: manually) {
-                    done?(reason)
-                    return
-                }
-                tab.sleep(picture: picture)
-                done?("asleep")
+        let job = Job(tab, manually: manually)
+        if let done { job.completions.append(done) }
+        pending.append(job)
+        advance()
+    }
+
+    private func reason(_ job: Job) -> String? {
+        guard let browser, let tab = job.tab,
+              browser.allTabs.contains(where: { $0 === tab }) else { return "tab closed" }
+        guard tab.built === job.page, job.page != nil, tab.touched == job.touched else { return "used again" }
+        return browser.awake(because: tab, manually: job.manually)
+    }
+
+    private func advance() {
+        guard running == nil, !pending.isEmpty else { return }
+        let job = pending.removeFirst()
+        running = job
+        if let reason = reason(job) { finish(job, reason); return }
+        job.tab?.unsaved { [weak self] typed in
+            guard let self else { return }
+            if typed { self.finish(job, "holding something typed"); return }
+            if let reason = self.reason(job) { self.finish(job, reason); return }
+            job.tab?.snapshot { [weak self] picture in
+                guard let self else { return }
+                if let reason = self.reason(job) { self.finish(job, reason); return }
+                job.tab?.sleep(picture: picture)
+                self.finish(job, "asleep")
             }
         }
+    }
+
+    private func finish(_ job: Job, _ result: String) {
+        guard running === job else { return }
+        running = nil
+        job.completions.forEach { $0(result) }
+        // Let input and selection changes run before starting the next page.
+        DispatchQueue.main.async { [weak self] in self?.advance() }
     }
 }

@@ -618,7 +618,7 @@ struct BookmarkOutline: View {
                         )
                 } else {
                     Spacer().frame(width: 10)
-                    Mark(icon: Favicons.shared.cached(node.host ?? ""), letter: String((node.host ?? "•").prefix(1)).uppercased(), size: 15)
+                    SiteMark(host: node.host ?? "", letter: String((node.host ?? "•").prefix(1)).uppercased(), size: 15)
                 }
                 if editing {
                     Editor(node: node, save: save)
@@ -1129,7 +1129,7 @@ struct BookmarksPanel: View {
                     Mark(icon: nil, letter: "", size: 16)
                         .overlay(Image(systemName: "folder.fill").font(.system(size: 9.5)).foregroundStyle(Palette.muted))
                 } else {
-                    Mark(icon: Favicons.shared.cached(node.host ?? ""), letter: String((node.host ?? "•").prefix(1)).uppercased(), size: 16)
+                    SiteMark(host: node.host ?? "", letter: String((node.host ?? "•").prefix(1)).uppercased(), size: 16)
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(node.title)

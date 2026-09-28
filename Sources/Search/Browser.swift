@@ -543,6 +543,7 @@ final class Browser: NSObject, ObservableObject {
     /// macOS saying memory is short. See Sleep.swift.
     var dozing: Timer?
     var pressure: DispatchSourceMemoryPressure?
+    lazy var sleepQueue = SleepQueue(browser: self)
     /// Downloads still under way. See `keep(_:)`.
     @Published private(set) var downloading: [WKDownload] = []
     /// A page being translated, while it is (see Translate.swift).
@@ -608,7 +609,8 @@ final class Browser: NSObject, ObservableObject {
             for tab in allTabs {
                 guard let tabHost = tab.address?.host()?.lowercased() else { continue }
                 if tabHost == lower || tabHost == "www." + lower || lower == "www." + tabHost {
-                    tab.icon = image
+                    // An alias can finish later than this host's own icon.
+                    tab.icon = Favicons.shared.cached(tabHost) ?? image
                 }
             }
         }
@@ -1194,6 +1196,7 @@ final class Browser: NSObject, ObservableObject {
         writeSession()
         Spaces.write(spaces)
         Session.settle()
+        history.flush()
     }
 
 
@@ -1781,6 +1784,9 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         guard let tab = tab(for: webView) else { return }
+        #if DEBUG
+        NativeProbe.navigation("commit", tab: tab)
+        #endif
         tab.extensionReturn.finished(navigation)
         if let owner = tab.owner, tab.id == owner.activeID { owner.linkStatus.dismiss() }
         tab.failure = nil
@@ -1788,9 +1794,6 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         // Whatever you last set this site to, before it draws a single frame
         // at the wrong size.
         tab.applyRememberedZoom()
-        // A tab waking from sleep: the new document is in, and a moment
-        // after it is on screen the picture of the old one can go.
-        tab.uncover(after: 0.45)
     }
 
     /// The page has drawn something: a view kept out of sight until now, so
@@ -1799,13 +1802,20 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
     @objc(_webView:renderingProgressDidChange:)
     func webView(_ webView: WKWebView, renderingProgressDidChange events: UInt) {
         guard events & PageView.firstFrame != 0 else { return }
-        (webView as? PageView)?.showFirstFrame()
+        #if DEBUG
+        if let tab = tab(for: webView) { NativeProbe.navigation("firstFrame", tab: tab) }
+        #endif
+        let tab = tab(for: webView)
+        // The cover supplies the fade. Fading the page too exposes the
+        // window background between the old picture and the live document.
+        (webView as? PageView)?.showFirstFrame(animated: tab?.cover == nil)
+        tab?.uncover()
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         // A page with nothing to lay out never has a first frame. Done is
         // done, and it is shown.
-        (webView as? PageView)?.showFirstFrame()
+        (webView as? PageView)?.showFirstFrame(animated: tab(for: webView)?.cover == nil)
         guard let tab = tab(for: webView), let url = tab.address else { return }
         tab.uncover()
         guard !tab.onDial else { return }

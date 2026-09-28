@@ -17,6 +17,7 @@ import struct
 import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 SUPPORT = runpy.run_path(str(ROOT / 'Tests/chrome_support.py'))
@@ -50,6 +51,7 @@ class OwnedLaunchedApp:
 class Fixture(BaseHTTPRequestHandler):
     # Every path asked for, in order: what the blocker let reach the server.
     seen = []
+    suggestion_headers = []
 
     def do_POST(self):
         Fixture.seen.append(self.path)
@@ -60,6 +62,34 @@ class Fixture(BaseHTTPRequestHandler):
 
     def do_GET(self):
         Fixture.seen.append(self.path)
+        if self.path == '/wake.css':
+            time.sleep(5 if Fixture.seen.count('/wake.css') > 1 else .05)
+            body = b'body{background:#304050;color:white}'
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/css')
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if self.path.startswith('/suggest?'):
+            Fixture.suggestion_headers.append(dict(self.headers))
+            query = parse_qs(urlsplit(self.path).query).get('q', [''])[0]
+            if query.startswith('slow'):
+                time.sleep(1.2)
+            values = [query + ' first', query + ' second', query + ' first', '', 'https://example.org/']
+            body = (b'{' if query == 'malformed' else b'x' * 100000 if query == 'oversized'
+                    else json.dumps([query, values]).encode())
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Set-Cookie', 'suggestion-test=secret; Path=/')
+            self.end_headers()
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return
         if self.path in ('/blocker', '/blocker-off'):
             body = (f'<!doctype html><meta charset="utf-8"><title>Fixture {self.path}</title>'
                     '<style>body{font:18px system-ui;padding:40px}a,button{display:block;margin:18px 0;font:inherit}</style>'
@@ -103,6 +133,7 @@ class Fixture(BaseHTTPRequestHandler):
             return
         path = html.escape(self.path)
         icon = '<link rel="icon" href="/wide-icon.png" sizes="512x256">' if self.path == '/favicon' else ''
+        if self.path == '/wake': icon += '<link rel="stylesheet" href="/wake.css">'
         body = (f'<!doctype html><meta charset="utf-8"><title>Fixture {path}</title>'
                 f'{icon}'
                 '<style>body{padding:70px;font:18px system-ui}#capture{display:block;'
@@ -128,7 +159,7 @@ class Fixture(BaseHTTPRequestHandler):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('flow', choices=['capture', 'downloads', 'pin-home', 'editor', 'core', 'spaces', 'extensions', 'offscreen', 'shield', 'blocker', 'blocker-off', 'restore-scripts', 'hidden-scripts', 'layout', 'selection', 'extension-shortcuts', 'find', 'applescript', 'split', 'startup', 'groups', 'bookmarks-dial', 'favicon', 'address-small'])
+    parser.add_argument('flow', choices=['capture', 'downloads', 'pin-home', 'editor', 'core', 'spaces', 'extensions', 'offscreen', 'shield', 'blocker', 'blocker-off', 'restore-scripts', 'hidden-scripts', 'layout', 'selection', 'extension-shortcuts', 'find', 'applescript', 'split', 'startup', 'groups', 'bookmarks-dial', 'favicon', 'address-small', 'suggestions', 'forms-churn', 'wake', 'settings-scroll'])
     parser.add_argument('--binary', default=str(ROOT / '.build/debug/Search'))
     args = parser.parse_args()
     binary = Path(args.binary).resolve()
@@ -221,6 +252,10 @@ def main():
         prefs = plistlib.loads(prefs_path.read_bytes())
         prefs.update({'downloads': str(downloads), 'downloads.ask': False,
                       'pins.returnHome': True})
+        if args.flow == 'suggestions':
+            os.environ['SEARCH_SUGGESTIONS_URL'] = run.origin + '/suggest'
+            prefs['search.keywords'] = json.dumps([{'id':str(uuid.uuid4()),'keyword':'fixture',
+                                                    'template':run.origin+'/results?q=%s'}]).encode()
         if args.flow == 'groups':
             prefs['tabs.groups'] = True
         if args.flow == 'blocker-off':
@@ -294,8 +329,10 @@ def main():
             top,center,bottom=icon['verticalAlpha']
             run.check(top<.01 and center>.99 and bottom<.01,'wide source keeps its aspect ratio and transparent padding')
             wait(lambda:(run.profile/'icons/127.0.0.1.png').exists(),bool,'favicon was not persisted')
-            restored=run.ask('native',action='favicon',host='127.0.0.1',cached=True,evict=True,
-                             path=str(artifact/'reloaded-icon.png'))
+            run.ask('native',action='favicon',host='127.0.0.1',cached=True,evict=True)
+            restored=wait(lambda:run.ask('native',action='favicon',host='127.0.0.1',cached=True,
+                                        path=str(artifact/'reloaded-icon.png')),
+                          lambda value:value.get('available'),'disk icon did not arrive after eviction')
             run.check(restored.get('available') and restored['pixels']==[64,64],
                       'a host first marked absent reloads from disk after cache eviction')
             run.check(restored['verticalAlpha']==icon['verticalAlpha'],'disk reload preserves the normalized artwork')
@@ -687,6 +724,153 @@ def main():
             menu('Tabs', 'Unsplit')
             wait(lambda: run.ask('split'), lambda s:not s['pairs'], 'native Unsplit did not release the pair')
             run.check(True, 'native Unsplit removes the pair')
+        elif args.flow == 'settings-scroll':
+            run.ask('ui', settings=True)
+            settings_category('Tabs')
+            before = run.ask('native', action='scroll-areas')['areas']
+            scroll = max(before, key=lambda area:area['documentHeight']-area['height'])
+            run.ask('native', action='scroll-areas', index=scroll['index'], lines=-3)
+            def scrolled():
+                return next(area for area in run.ask('native', action='scroll-areas')['areas'] if area['index']==scroll['index'])
+            after = wait(scrolled,lambda area:area['y']>scroll['y']+60,'Settings wheel still barely moves a row')
+            run.check(after['y'] < after['documentHeight']-after['height'], 'wheel scroll moves within the Settings page')
+            run.ask('native',action='scroll-areas',index=scroll['index'],lines=3)
+            wait(scrolled,lambda area:abs(area['y']-scroll['y'])<1,'reverse wheel did not return to the original position')
+            run.check(True,'Settings wheel moves both ways without overshooting the top')
+            (artifact/'settings-scroll.json').write_text(json.dumps({'before':before,'after':after},indent=2))
+        elif args.flow == 'wake':
+            other = run.open('/wake-other')
+            run.ask('sleep',id=tab)
+            run.check(next(t for t in run.ask('tabs')['tabs'] if t['id']==tab)['asleep'],'page releases its live view before wake')
+            run.ask('native',action='navigation',reset=True)
+            run.ask('select',id=tab)
+            time.sleep(4.3)
+            waiting = run.ask('native',action='navigation')
+            target = next(t for t in waiting['tabs'] if t['id'].lower().startswith(tab.lower()))
+            run.check(target['unpainted'] and target['cover'],'slow first paint keeps its saved picture beyond the old timer')
+            run.page(tab,'/wake')
+            after=wait(lambda:run.ask('native',action='navigation'),lambda s:s['retainedPictures']==0,
+                       'finished wake kept decoded screenshot artwork')
+            target=next(t for t in after['tabs'] if t['id'].lower().startswith(tab.lower()))
+            run.check(not target['cover'] and not target['unpainted'] and target['alpha']==1,'woken page is opaque and no longer covered')
+            events=[e for e in after['events'] if e['tab'].lower().startswith(tab.lower())]
+            paint=next(e['time'] for e in events if e['event']=='firstFrame')
+            uncover=next(e['time'] for e in events if e['event']=='uncover')
+            run.check(uncover>=paint,'picture leaves only after the page paints')
+            run.check(after['retainedPictures']==0,'finished fade releases the saved picture')
+            (artifact/'wake.json').write_text(json.dumps({'waiting':waiting,'after':after},indent=2))
+        elif args.flow == 'forms-churn':
+            run.ask('native', action='performance', render=True)
+            def forms(script):
+                return run.ask('eval', id=tab, world='search', js=script).get('value')
+            # Instrument only SearchX's isolated script world. Page code and
+            # its own query costs are not attributed to the browser.
+            forms("""(() => {
+                window.formScans=[];
+                const original=Document.prototype.querySelectorAll;
+                Document.prototype.querySelectorAll=function(selector) {
+                    const start=performance.now(), result=original.call(this,selector);
+                    if(selector==='input[type="password"]') formScans.push(performance.now()-start);
+                    return result;
+                }; return true;
+            })()""")
+            run.js(tab,"""(() => {
+                const deck=document.createElement('div');deck.id='cards';
+                const fragment=document.createDocumentFragment();
+                for(let i=0;i<8000;i++){const card=document.createElement('div');card.textContent='Card '+i;fragment.append(card)}
+                deck.append(fragment);document.body.append(deck);window.churnCount=0;
+                window.churn=setInterval(()=>{deck.firstChild.textContent='Frame '+(++churnCount)},16);
+                return true;
+            })()""")
+            time.sleep(4)
+            run.js(tab,'clearInterval(churn);true')
+            measurements={'mutations':run.js(tab,'churnCount'),'passwordScansMs':forms('formScans')}
+            (artifact/'form-scans.json').write_text(json.dumps(measurements,indent=2))
+            run.js(tab,"""document.body.insertAdjacentHTML('beforeend',
+                '<form id="signin"><input id="user" type="email"><input id="pass" type="password"></form>');
+                window.changed=[];document.querySelector('#signin').addEventListener('input',e=>changed.push(e.target.id));true""")
+            wait(lambda:forms('__officeForms.hasPassword()'),bool,'dynamic login not detected')
+            run.check(forms('__officeForms.fill("test@example.com","local-test-only")'),'autofill finds a late login form')
+            run.check(run.js(tab,'changed.includes("user") && changed.includes("pass")'),'autofill dispatches input events to the site')
+            run.js(tab,"document.querySelector('#pass').type='text';true")
+            run.check(not forms('__officeForms.hasPassword()'),'show-password changes are respected')
+            run.js(tab,"document.querySelector('#pass').type='password';true")
+            run.check(forms('__officeForms.hasPassword()'),'password input is recognized when its type returns')
+            run.js(tab,"document.querySelector('#signin').remove();true")
+            run.check(not forms('__officeForms.hasPassword()'),'removed forms release their fields')
+            run.js(tab,"document.body.insertAdjacentHTML('beforeend','<input type=" + '"password" id="replacement" style="display:none">' + "');true")
+            run.check(not forms('__officeForms.hasPassword()'),'hidden password does not offer autofill')
+            run.js(tab,"document.querySelector('#replacement').style.display='block';true")
+            run.check(forms('__officeForms.fill("","new-local-test")'),'a revealed replacement password field can be filled')
+            run.check(run.js(tab,"document.querySelector('#replacement').value")=="new-local-test",'autofill reaches the current page field')
+        elif args.flow == 'suggestions':
+            def field():
+                return run.ask('native', action='field')
+            def queries():
+                return [parse_qs(urlsplit(path).query).get('q', [''])[0]
+                        for path in Fixture.seen if path.startswith('/suggest?')]
+            run.ask('field', text='how many')
+            suggestions = wait(field, lambda s: any(o['key']=='how many first' for o in s['offers']),
+                               'provider suggestions never arrived', timeout=4)
+            run.check(suggestions['typed']=='how many' and suggestions['completed']=='how many',
+                      'suggestions do not replace typed words')
+            keys = [o['key'] for o in suggestions['offers']]
+            run.check(len(keys)==len(set(keys)) and '' not in keys, 'empty and duplicate suggestions are discarded')
+            run.ask('field', text='slow old')
+            wait(queries, lambda q:'slow old' in q, 'delayed request never started')
+            run.ask('press', code=125, chars='\uf701', mods=[])
+            chosen = field()['completed']
+            wait(field, lambda s:any(o['key']=='slow old first' for o in s['offers']), 'delayed result missing')
+            run.check(field()['completed']==chosen, 'arriving results preserve the selected row')
+            run.ask('field', text='slow stale')
+            wait(queries, lambda q:'slow stale' in q, 'stale request never started')
+            run.ask('field', text='fresh query')
+            wait(field, lambda s:any(o['key']=='fresh query first' for o in s['offers']), 'new query missing')
+            time.sleep(1.3)
+            run.check(all(not o['key'].startswith('slow stale') for o in field()['offers']), 'late response cannot overwrite a newer query')
+            for query in ['https://example.com/account?token=secret', 'name@example.com', 'file:///tmp/private', 'localhost:8080/token', 'fixture local query']:
+                before = len(queries())
+                run.ask('field', text=query); time.sleep(.3)
+                run.check(len(queries())==before, 'address stays local: ' + query)
+            for query in ['malformed', 'oversized']:
+                run.ask('field', text=query)
+                wait(queries, lambda q:query in q, 'invalid-response request missing')
+                time.sleep(.3)
+                run.check(field()['completed']==query and len(field()['offers'])==1, 'bad suggestion response leaves search usable: ' + query)
+            run.ask('field', text='🦊 travel')
+            wait(field, lambda s:any(o['key']=='🦊 travel first' for o in s['offers']), 'Unicode completion missing')
+            for _ in range(2): run.ask('press', code=125, chars='\uf701', mods=[])
+            run.ask('press', code=51, chars='\x7f', mods=[])
+            run.check(field()['typed']=='🦊 travel', 'deleting a Unicode completion preserves the typed prefix')
+            run.ask('field', text='choose query')
+            wait(field, lambda s:any(o['key']=='choose query second' for o in s['offers']), 'keyboard results missing')
+            for _ in range(3): run.ask('press', code=125, chars='\uf701', mods=[])
+            run.check(field()['completed']=='choose query second', 'arrow keys choose a completion')
+            shot('suggestions-selected')
+            run.ask('press', code=36, chars='\r', mods=[])
+            wait(lambda: run.ask('tabs')['tabs'], lambda ts:any(t['active'] and 'q=choose%20query%20second' in t['url'] for t in ts),
+                 'Return did not search for selected completion')
+            run.check(not any('Cookie' in headers for headers in Fixture.suggestion_headers), 'suggestion requests do not reuse provider cookies')
+            run.ask('ui', engine='bing')
+            run.ask('field', text='bing query')
+            wait(field, lambda s:any(o['key']=='bing query first' for o in s['offers']), 'selected engine did not suggest')
+            run.check(any('engine=bing' in path for path in Fixture.seen), 'suggestions use the selected search engine')
+            run.ask('field', text='slow opted out')
+            wait(queries, lambda q:'slow opted out' in q, 'opt-out request never started')
+            run.ask('ui', suggestions=False)
+            time.sleep(1.3)
+            run.check(not any(o['key']=='slow opted out first' for o in field()['offers']), 'turning suggestions off discards an in-flight reply')
+            before = len(queries())
+            run.ask('field', text='disabled query'); time.sleep(.4)
+            run.check(len(queries())==before, 'typing with suggestions disabled stays local')
+            run.ask('ui', suggestions=True)
+            wait(field, lambda s:any(o['key']=='disabled query first' for o in s['offers']), 'live opt-in did not refresh suggestions')
+            menu('File', 'New Private Window')
+            before = len(queries())
+            run.ask('field', text='private query'); time.sleep(.4)
+            run.check(len(queries())==before, 'private-window typing never reaches the suggestion service')
+            (artifact/'suggestions.json').write_text(json.dumps({'field':field(),'requests':Fixture.seen,
+                                                               'headers':Fixture.suggestion_headers},indent=2))
         elif args.flow == 'core':
             run.js(tab, "document.cookie='marker=normal; Path=/; Max-Age=3600'; window.retainedState='still here'")
             first_window = run.ask('probe')['keyModel']

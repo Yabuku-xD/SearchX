@@ -71,8 +71,7 @@ final class WheelGlide {
     private var x = Curve(), y = Curve()
     /// How far the page has been sent, in whole points, on each axis.
     private var sent = CGVector.zero
-    private var aim = CGPoint.zero
-    private var flags: CGEventFlags = []
+    private var source: CGEvent?
     private var link: CADisplayLink?
 
     init(view: NSView, deliver: @escaping (NSEvent) -> Void) {
@@ -89,14 +88,13 @@ final class WheelGlide {
               UserDefaults.standard.bool(forKey: "NSScrollAnimationEnabled"),
               !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
               let cg = event.cgEvent, let view
-        else { return false }
+        else { stop(); return false }
         let step = CGVector(dx: event.scrollingDeltaX * Self.line, dy: event.scrollingDeltaY * Self.line)
         guard step.dx != 0 || step.dy != 0 else { return true }
         let now = CACurrentMediaTime()
         if step.dx != 0 { x.retarget(by: Double(step.dx), at: now) }
         if step.dy != 0 { y.retarget(by: Double(step.dy), at: now) }
-        aim = cg.location
-        flags = cg.flags
+        source = cg.copy()
         if link == nil {
             let link = view.displayLink(target: self, selector: #selector(frame(_:)))
             link.add(to: .main, forMode: .common)
@@ -112,6 +110,7 @@ final class WheelGlide {
         x = Curve()
         y = Curve()
         sent = .zero
+        source = nil
     }
 
     @objc private func frame(_ link: CADisplayLink) {
@@ -130,14 +129,20 @@ final class WheelGlide {
     }
 
     private func send(_ delta: CGVector) {
-        guard let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2,
-                               wheel1: Int32(delta.dy), wheel2: Int32(delta.dx), wheel3: 0)
+        guard let cg = source?.copy(),
+              let pixels = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2,
+                                   wheel1: Int32(delta.dy), wheel2: Int32(delta.dx), wheel3: 0)
         else { return }
-        cg.location = aim
-        cg.flags = flags
-        cg.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
-        cg.setIntegerValueField(.scrollWheelEventPointDeltaAxis1, value: Int64(delta.dy))
-        cg.setIntegerValueField(.scrollWheelEventPointDeltaAxis2, value: Int64(delta.dx))
+        // AppKit stores the window association in the original event. A fresh
+        // CGEvent loses it, so WebKit treats screen coordinates as window
+        // coordinates and misses nested controls such as video player menus.
+        cg.timestamp = pixels.timestamp
+        for field: CGEventField in [.scrollWheelEventDeltaAxis1, .scrollWheelEventDeltaAxis2, .scrollWheelEventDeltaAxis3,
+                                    .scrollWheelEventFixedPtDeltaAxis1, .scrollWheelEventFixedPtDeltaAxis2, .scrollWheelEventFixedPtDeltaAxis3,
+                                    .scrollWheelEventPointDeltaAxis1, .scrollWheelEventPointDeltaAxis2, .scrollWheelEventPointDeltaAxis3,
+                                    .scrollWheelEventIsContinuous] {
+            cg.setIntegerValueField(field, value: pixels.getIntegerValueField(field))
+        }
         if let event = NSEvent(cgEvent: cg) { deliver(event) }
     }
 }

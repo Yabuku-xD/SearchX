@@ -47,4 +47,6 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.release.tag_name || inputs.tag }}
+          # Manual runs stage both architectures before the release is published.
+          draft: ${{ github.event_name == 'workflow_dispatch' }}
           files: searchx-linux-${{ matrix.arch }}.tar.gz

@@ -199,12 +199,14 @@ private struct HistoryList: View {
 
     @ViewBuilder
     private func icon(_ url: URL) -> some View {
-        if let host = url.host(), let image = Favicons.shared.cached(host) {
-            Image(nsImage: image).resizable().interpolation(.high)
-        } else {
-            Image(systemName: "globe")
-                .font(.system(size: 11))
-                .foregroundStyle(Palette.muted)
+        CachedIcon(host: url.host() ?? "") { image in
+            if let image {
+                Image(nsImage: image).resizable().interpolation(.high)
+            } else {
+                Image(systemName: "globe")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.muted)
+            }
         }
     }
 }
@@ -260,6 +262,9 @@ final class StageView: NSView {
     /// spring (Motion.fold at Sidebar speed), started in the same transaction.
     private var overlay = PageOverlay()
     private var blur: BackgroundBlurView?
+    /// Detached between reveals, so it does no compositing while hidden.
+    /// Reuse its filters instead of rebuilding them on every pointer entry.
+    private var restingBlur: BackgroundBlurView?
     /// Sliding away with the column; kept until the slide is over.
     private var blurLeaving = false
     /// The slide under way. Its end is claimed once, by whichever comes
@@ -275,6 +280,9 @@ final class StageView: NSView {
     /// on every frame the page underneath paints.
     private let covering = CoverView()
     private var coverShown: NSImage?
+    #if DEBUG
+    var holdsWakePicture: Bool { covering.image != nil }
+    #endif
 
     /// Shown at once — a blank frame first is what it is there to hide —
     /// and let go with a short fade when the page underneath has painted.
@@ -292,7 +300,9 @@ final class StageView: NSView {
         }
         guard covering.superview === self else { return }
         guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, let layer = covering.layer else {
-            return covering.removeFromSuperview()
+            covering.removeFromSuperview()
+            covering.image = nil
+            return
         }
         let fade = CABasicAnimation(keyPath: "opacity")
         fade.fromValue = layer.presentation()?.opacity ?? 1
@@ -304,6 +314,7 @@ final class StageView: NSView {
             MainActor.assumeIsolated {
                 guard let self, self.coverShown == nil else { return }
                 self.covering.removeFromSuperview()
+                self.covering.image = nil
             }
         }
         layer.opacity = 0
@@ -344,11 +355,16 @@ final class StageView: NSView {
         wanted = page
         let before = self.overlay
         self.overlay = overlay
+        // Keep the existing material through layout until its exit slide ends.
+        if before.out && !overlay.out { blurLeaving = animated && blur != nil }
         settle()
         if before.out != overlay.out { slideBlur(animated: animated) }
     }
 
     private func settle() {
+        #if DEBUG
+        NativeProbe.stageSettles += 1
+        #endif
         // A video filling the screen has its page lent to WebKit's own
         // window, with a placeholder left here in its place. The chrome
         // stepping aside lays this stage out again in that same moment, and
@@ -369,6 +385,9 @@ final class StageView: NSView {
 
         guard let wanted, window != nil else { dropBlur(); return }
         if wanted.superview !== self {
+            #if DEBUG
+            NativeProbe.pageAttachments += 1
+            #endif
             // A web view can have only one superview, so taking it back is how
             // it is taken back.
             wanted.removeFromSuperview()
@@ -419,7 +438,8 @@ final class StageView: NSView {
         // left — a new tab going to its first site — found "leaving" still
         // set with nothing to carry, and got a fresh blur over it.
         guard overlay.radius > 0, overlay.extent > 0, overlay.out || (blurLeaving && blur != nil) else { return dropBlur() }
-        let view = blur ?? BackgroundBlurView(frame: .zero)
+        let view = blur ?? restingBlur ?? BackgroundBlurView(frame: .zero)
+        restingBlur = nil
         blur = view
         if view.superview !== self || subviews.last !== view {
             addSubview(view, positioned: .above, relativeTo: nil)
@@ -444,6 +464,11 @@ final class StageView: NSView {
         slide = nil
         blur.layer?.removeAnimation(forKey: "fold")
         blur.removeFromSuperview()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        blur.layer?.transform = CATransform3DIdentity
+        CATransaction.commit()
+        restingBlur = blur
         self.blur = nil
         blurLeaving = false
     }

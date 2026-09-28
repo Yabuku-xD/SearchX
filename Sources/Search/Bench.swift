@@ -940,14 +940,29 @@ final class Bench {
             let pixels = request["pixels"] as? Double ?? 0
             let count = max(1, request["count"] as? Int ?? 1)
             let ms = request["ms"] as? Double ?? 0
-            let middle = window.convertPoint(toScreen: web.convert(NSPoint(x: web.bounds.midX, y: web.bounds.midY), to: nil))
-            let at = CGPoint(x: middle.x, y: (NSScreen.screens.first?.frame.maxY ?? 0) - middle.y)
+            let coordinates = request["at"] as? [Double]
+            let point: NSPoint
+            if let coordinates, coordinates.count == 2, coordinates.allSatisfy(\.isFinite) {
+                point = NSPoint(x: coordinates[0], y: web.isFlipped ? coordinates[1] : web.bounds.height - coordinates[1])
+            } else {
+                point = NSPoint(x: web.bounds.midX, y: web.bounds.midY)
+            }
+            let at = web.convert(point, to: nil)
             func send() {
                 let units: CGScrollEventUnit = lines == nil ? .pixel : .line
-                guard let cg = CGEvent(scrollWheelEvent2Source: nil, units: units, wheelCount: 1,
-                                       wheel1: Int32(lines ?? pixels), wheel2: 0, wheel3: 0) else { return }
-                if lines == nil { cg.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1) }
-                cg.location = at
+                guard let wheel = CGEvent(scrollWheelEvent2Source: nil, units: units, wheelCount: 1,
+                                          wheel1: Int32(lines ?? pixels), wheel2: 0, wheel3: 0),
+                      let positioned = NSEvent.mouseEvent(with: .mouseMoved, location: at, modifierFlags: [],
+                          timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                          context: nil, eventNumber: 0, clickCount: 0, pressure: 0),
+                      let cg = positioned.cgEvent?.copy() else { return }
+                // An NSEvent made from a bare CGEvent has no window. AppKit's
+                // event carries the association WebKit needs for hit testing.
+                cg.type = .scrollWheel
+                for field: CGEventField in [.scrollWheelEventDeltaAxis1, .scrollWheelEventFixedPtDeltaAxis1,
+                                            .scrollWheelEventPointDeltaAxis1, .scrollWheelEventIsContinuous] {
+                    cg.setIntegerValueField(field, value: wheel.getIntegerValueField(field))
+                }
                 if let event = NSEvent(cgEvent: cg) { web.scrollWheel(with: event) }
             }
             for n in 0..<count {
@@ -1504,6 +1519,8 @@ final class Bench {
             // Open or close the app's own panels, to reproduce what a person
             // did without a person.
             if let on = request["settings"] as? Bool { browser.tuning = on }
+            if Store.testing, let on = request["suggestions"] as? Bool { browser.prefs.searchSuggestions = on }
+            if Store.testing, let engine = (request["engine"] as? String).flatMap(Engine.init) { browser.prefs.engine = engine }
             if let on = request["passwords"] as? Bool { browser.managing = on }
             if let on = request["welcome"] as? Bool { browser.welcoming = on }
             if let on = request["history"] as? Bool { browser.recalling = on }

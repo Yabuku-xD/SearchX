@@ -2,6 +2,7 @@ import SwiftUI
 import WebKit
 import CoreGraphics
 import ImageIO
+import Combine
 
 // A site's own icon, for the tabs that are set to wear one.
 //
@@ -18,6 +19,10 @@ final class Favicons {
     /// Called with a host and its icon whenever one arrives, so every tab on
     /// that host can put it on at once.
     var arrived: ((String, NSImage) -> Void)?
+    let updates = PassthroughSubject<String, Never>()
+    private var reading: [String: Task<NSImage?, Never>] = [:]
+    private var stamps: [String: Date] = [:]
+    private static let decoder = DispatchQueue(label: "search.icons", qos: .utility)
 
     private var busy: Set<String> = []
     private var missing: Set<String> = []
@@ -68,6 +73,7 @@ final class Favicons {
     /// variant when there is one, the ordinary icon otherwise.
     func cached(_ host: String) -> NSImage? {
         let normalized = host.lowercased()
+        guard !normalized.isEmpty else { return nil }
         if let hit = match(normalized) { return hit }
         if normalized.hasPrefix("www.") {
             let bare = String(normalized.dropFirst(4))
@@ -91,18 +97,54 @@ final class Favicons {
         // thousand of them each time it drew. One that arrives later goes
         // into the cache, which is asked first.
         if absent.contains(key) { return nil }
-        guard let image = Favicons.square(from: Favicons.file(key)) else {
-            absent.insert(key)
-            return nil
+        if reading[key] == nil {
+            let url = Self.file(key)
+            reading[key] = Task { [weak self] in
+                let (image, stamp): (NSImage?, Date?) = await withCheckedContinuation { continuation in
+                    Self.decoder.async {
+                        let image = Self.square(from: url)
+                        let stamp = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+                        continuation.resume(returning: (image, stamp))
+                    }
+                }
+                guard let self else { return image }
+                self.reading[key] = nil
+                // A network/import result may have arrived while disk IO ran.
+                if let newer = Self.cache.object(forKey: key as NSString) { return newer }
+                if let stamp { self.stamps[key] = stamp }
+                guard let image else { self.absent.insert(key); return nil }
+                self.remember(image, for: key)
+                self.publish(key)
+                return image
+            }
         }
-        remember(image, for: key)
-        return image
+        return nil
     }
 
-    private static func fresh(_ key: String) -> Bool {
-        guard let stamp = try? file(key).resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
-        else { return false }
+    private func read(_ key: String) async -> NSImage? {
+        if let image = known(key) { return image }
+        return await reading[key]?.value
+    }
+
+    private func stored(_ host: String) async -> NSImage? {
+        let alias = host.hasPrefix("www.") ? String(host.dropFirst(4)) : "www." + host
+        for name in [host, alias] {
+            if Self.dark, let image = await read(Self.key(name, dark: true)) { return image }
+            if let image = await read(name) { return image }
+        }
+        return nil
+    }
+
+    private func fresh(_ key: String) -> Bool {
+        guard let stamp = stamps[key] else { return false }
         return Date().timeIntervalSince(stamp) < 7 * 86_400
+    }
+
+    private func publish(_ key: String) {
+        let host = key.hasSuffix("@dark") ? String(key.dropLast(5)) : key
+        // A late light read must not replace a dark variant already in use.
+        if let image = cached(host) { arrived?(host, image) }
+        updates.send(host)
     }
 
     /// The look changed: every tab puts on the icon that goes with it, and
@@ -119,31 +161,44 @@ final class Favicons {
     /// An icon from somewhere else — another browser's cache, at import —
     /// kept as if the site had handed it over, unless one is already here.
     func adopt(_ data: Data, for host: String) async {
-        guard cached(host) == nil, let image = await Favicons.square(data) else { return }
+        let host = host.lowercased()
+        guard await stored(host) == nil, let image = await Favicons.square(data) else { return }
         remember(image, for: host)
         keep(image, for: host)
-        arrived?(host, image)
+        publish(host)
     }
 
     /// Asks the page which icon it wants to be known by, fetches it, and keeps
     /// it. Nothing happens if a fresh one is already on disk.
     func fetch(for tab: Tab) {
-        guard let url = tab.address, let host = url.host()?.lowercased(),
+        guard let web = tab.built, let url = tab.address, let host = url.host()?.lowercased(),
               url.scheme?.hasPrefix("http") == true
         else { return }
 
-        let dark = Favicons.dark
+        guard !busy.contains(host), !missing.contains(host) else { return }
+        busy.insert(host)
+        Task { [weak tab, weak web] in
+            let dark = Favicons.dark
+            _ = await read(Favicons.key(host, dark: dark))
+            guard let tab, let web, tab.built === web, tab.address?.host()?.lowercased() == host else {
+                busy.remove(host)
+                return
+            }
+            fetch(for: tab, web: web, url: url, host: host, dark: dark)
+        }
+    }
+
+    private func fetch(for tab: Tab, web: WKWebView, url: URL, host: String, dark: Bool) {
         // Fresh and right for this look: nothing to do. In the dark, a fresh
         // light icon is not enough on its own — the site may offer a dark
         // one that has never been asked for — so the page is asked.
-        if Favicons.fresh(Favicons.key(host, dark: dark)), let known = known(Favicons.key(host, dark: dark)) {
+        if fresh(Favicons.key(host, dark: dark)), let known = known(Favicons.key(host, dark: dark)) {
             if tab.address?.host()?.lowercased() == host { tab.icon = known }
+            busy.remove(host)
             return
         }
-        guard !busy.contains(host), !missing.contains(host) else { return }
-        busy.insert(host)
 
-        tab.web.evaluateJavaScript(Favicons.probe) { [weak self, weak tab] answer, _ in
+        web.evaluateJavaScript(Favicons.probe) { [weak self, weak tab] answer, _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 let declared = (answer as? [[String: String]]) ?? []
@@ -152,7 +207,7 @@ final class Favicons {
                 let key = Favicons.key(host, dark: wantDark)
                 // No dark variant here after all, and the ordinary one is
                 // fresh: it is the one to wear.
-                if !wantDark, Favicons.fresh(key), let known = self.known(key) {
+                if !wantDark, self.fresh(key), let known = self.known(key) {
                     if tab?.address?.host()?.lowercased() == host {
                         tab?.icon = known
                     }
@@ -195,7 +250,7 @@ final class Favicons {
             guard let image = await Favicons.square(data) else { continue }
             remember(image, for: key)
             if !shy { keep(image, for: key) }
-            arrived?(host, image)
+            publish(key)
             return
         }
         // Not asked again this session: hammering a site for an icon it
@@ -213,7 +268,7 @@ final class Favicons {
         }.value
     }
 
-    private static func square(from url: URL) -> NSImage? {
+    nonisolated private static func square(from url: URL) -> NSImage? {
         let source = CGImageSourceCreateWithURL(url as CFURL,
             [kCGImageSourceShouldCache: false] as CFDictionary)
         return drawn(thumbnail(source) ?? NSImage(contentsOf: url))
@@ -260,6 +315,7 @@ final class Favicons {
     #endif
 
     private func keep(_ image: NSImage, for key: String) {
+        stamps[key] = Date()
         guard let tiff = image.tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff),
               let png = rep.representation(using: .png, properties: [:])
@@ -333,6 +389,37 @@ final class Favicons {
       return out;
     })();
     """
+}
+
+/// Only this icon updates when its disk read finishes, not the whole list.
+struct CachedIcon<Content: View>: View {
+    let host: String
+    @ViewBuilder var content: (NSImage?) -> Content
+    @Environment(\.colorScheme) private var scheme
+    @State private var image: NSImage?
+
+    var body: some View {
+        content(image)
+            .task(id: host) { image = Favicons.shared.cached(host) }
+            .onChange(of: scheme) { _, _ in image = Favicons.shared.cached(host) }
+            .onReceive(Favicons.shared.updates) { changed in
+                func bare(_ value: String) -> String {
+                    let value = value.lowercased()
+                    return value.hasPrefix("www.") ? String(value.dropFirst(4)) : value
+                }
+                if bare(changed) == bare(host) { image = Favicons.shared.cached(host) }
+            }
+    }
+}
+
+struct SiteMark: View {
+    let host: String
+    let letter: String
+    var size: CGFloat = 16
+    var dim = false
+    var body: some View {
+        CachedIcon(host: host) { Mark(icon: $0, letter: letter, size: size, dim: dim) }
+    }
 }
 
 /// What stands for a page when there is no room for its title: the site's

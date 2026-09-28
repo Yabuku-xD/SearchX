@@ -229,6 +229,9 @@ final class BackgroundBlurView: NSView {
         radius = value
         self.dark = dark
         guard value > 0 else { backgroundFilters = []; return }
+        #if DEBUG
+        NativeProbe.backdropBuilds += 1
+        #endif
         // Keep the backdrop opaque after the Gaussian samples beyond the page
         // edges. CIColorMatrix operates on unpremultiplied colors, so restoring
         // alpha preserves those colors and leaves transparency to its own layer.
@@ -262,9 +265,7 @@ final class BackgroundBlurView: NSView {
     /// the filters are made again for the other one.
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
-        let value = radius
-        radius = -1
-        setRadius(value)
+        setRadius(radius)
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }

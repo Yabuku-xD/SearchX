@@ -145,7 +145,7 @@ struct PanelDoor: View {
     var body: some View {
         let open = window.panel?.id == WebPanel.id(site.id)
         Button { window.togglePanel(site) } label: {
-            Mark(icon: Favicons.shared.cached(site.host), letter: String(site.name.prefix(1)).uppercased(), size: 14, dim: !open && !hovering)
+            SiteMark(host: site.host, letter: String(site.name.prefix(1)).uppercased(), size: 14, dim: !open && !hovering)
                 .frame(width: 26, height: 26)
                 .background(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)

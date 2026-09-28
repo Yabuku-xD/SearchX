@@ -8,6 +8,16 @@ import WebKit
 enum NativeProbe {
     static var scrollMessages = 0
     static var snapshotRequests = 0
+    static var backdropBuilds = 0
+    static var stageSettles = 0
+    static var pageAttachments = 0
+    static var navigationEvents: [[String: Any]] = []
+    static func navigation(_ event: String, tab: Tab) {
+        guard Store.testing else { return }
+        navigationEvents.append(["event": event, "tab": tab.id.uuidString,
+                                 "time": CACurrentMediaTime(), "cover": tab.cover != nil])
+        if navigationEvents.count > 200 { navigationEvents.removeFirst(navigationEvents.count - 200) }
+    }
     /// How many drag moves the last "drag" posted, once it has let go.
     static var dragSent = 0
 
@@ -88,6 +98,13 @@ enum NativeProbe {
                     typealias Setter = @convention(c) (AnyObject, Selector, Bool) -> Void
                     unsafeBitCast(web.method(for: selector), to: Setter.self)(web, selector, tab !== browser.key?.active)
                 }
+                // The occlusion setter does not update WebKit's activity
+                // state itself. Reorder only the invisible owned window so
+                // its page receives the new visibility before measurement.
+                if ProcessInfo.processInfo.environment["SEARCH_PARK"] != nil, window?.alphaValue == 0 {
+                    window?.orderOut(nil)
+                    window?.orderBack(nil)
+                }
             }
             if request["front"] as? Bool == true {
                 // Keep this disposable workload visible without changing any
@@ -99,6 +116,9 @@ enum NativeProbe {
             if request["reset"] as? Bool == true {
                 scrollMessages = 0
                 snapshotRequests = 0
+                backdropBuilds = 0
+                stageSettles = 0
+                pageAttachments = 0
             }
             let selector = NSSelectorFromString("_webProcessIdentifier")
             let pids = browser.allTabs.compactMap { tab -> Int32? in
@@ -107,13 +127,27 @@ enum NativeProbe {
                 let pid = unsafeBitCast(web.method(for: selector), to: Getter.self)(web, selector)
                 return pid > 0 ? pid : nil
             }
+            let screenHz = window?.screen?.maximumFramesPerSecond ?? 0
+            let near60 = browser.key?.active?.built.flatMap { FrameRate.prefersNear60($0.configuration.preferences) }
             return ["scrollMessages": scrollMessages, "snapshotRequests": snapshotRequests,
+                    "backdropBuilds": backdropBuilds, "stageSettles": stageSettles, "pageAttachments": pageAttachments,
                     "appActive": NSApp.isActive, "appHidden": NSApp.isHidden,
                     "windowVisible": window?.occlusionState.contains(.visible) ?? false,
+                    "windowOrdered": window?.isVisible ?? false,
+                    "pageVisibility": browser.allTabs.compactMap { tab -> [String: Any]? in
+                        guard let web = tab.built else { return nil }
+                        let getter = NSSelectorFromString("_windowOcclusionDetectionEnabled")
+                        typealias Getter = @convention(c) (AnyObject, Selector) -> Bool
+                        let occlusion = web.responds(to: getter) ? unsafeBitCast(web.method(for: getter), to: Getter.self)(web, getter) : true
+                        return ["id": tab.id.uuidString, "active": tab === browser.key?.active,
+                                "hidden": web.isHiddenOrHasHiddenAncestor, "attached": web.window != nil,
+                                "occlusion": occlusion, "alpha": web.alphaValue]
+                    },
                     "webPIDs": Array(Set(pids)).sorted(),
                     "reading": browser.key?.active?.reading.through ?? 0,
                     "thumbnails": browser.allTabs.filter { $0.thumb != nil }.count,
-                    "screenHz": window?.screen?.maximumFramesPerSecond ?? 0,
+                    "screenHz": screenHz,
+                    "pageTargetHz": near60.map { $0 ? min(60, screenHz) : screenHz } as Any? ?? NSNull(),
                     "backdrops": window?.contentView.map { root in views(root).filter {
                         $0.identifier?.rawValue == "page-chrome-backdrop"
                     }.map { ["frame": NSStringFromRect($0.frame), "filters": $0.backgroundFilters.count] as [String: Any] } } ?? []]
@@ -124,6 +158,44 @@ enum NativeProbe {
                     "hidden": NSApp.isHidden]
         case "startup":
             return Web.poolStartup
+        case "navigation":
+            if request["reset"] as? Bool == true { navigationEvents = [] }
+            return ["events": navigationEvents,
+                    "retainedPictures": window?.contentView.map { views($0).compactMap { $0 as? StageView }.filter(\.holdsWakePicture).count } ?? 0,
+                    "tabs": browser.allTabs.map {
+                ["id": $0.id.uuidString, "cover": $0.cover != nil, "asleep": $0.asleep,
+                 "unpainted": $0.built?.unpainted ?? false,
+                 "alpha": $0.built?.alphaValue ?? -1] as [String: Any]
+            }]
+        case "field":
+            guard let model = browser.key else { return ["error": "no window"] }
+            return ["typed": model.typed, "completed": model.completed,
+                    "picked": model.picked as Any? ?? NSNull(),
+                    "offers": model.offers.map { ["key": $0.key, "url": $0.url.absoluteString] }]
+        case "scroll-areas":
+            guard let window, let root = window.contentView else { return ["error": "no window"] }
+            let areas = views(root).compactMap { $0 as? NSScrollView }.filter { !$0.isHiddenOrHasHiddenAncestor }
+            if let index = request["index"] as? Int, areas.indices.contains(index), let lines = request["lines"] as? Int32 {
+                let scroll = areas[index]
+                let at = scroll.convert(NSPoint(x: scroll.bounds.midX, y: scroll.bounds.midY), to: nil)
+                if let wheel = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: lines, wheel2: 0, wheel3: 0),
+                   let positioned = NSEvent.mouseEvent(with: .mouseMoved, location: at, modifierFlags: [],
+                       timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                       context: nil, eventNumber: 0, clickCount: 0, pressure: 0),
+                   let cg = positioned.cgEvent?.copy() {
+                    cg.type = .scrollWheel
+                    for field: CGEventField in [.scrollWheelEventDeltaAxis1, .scrollWheelEventFixedPtDeltaAxis1,
+                                                .scrollWheelEventPointDeltaAxis1, .scrollWheelEventIsContinuous] {
+                        cg.setIntegerValueField(field, value: wheel.getIntegerValueField(field))
+                    }
+                    if let event = NSEvent(cgEvent: cg) { scroll.scrollWheel(with: event) }
+                }
+            }
+            return ["areas": areas.enumerated().map { index, area in
+                ["index": index, "class": String(describing: type(of: area)), "line": area.verticalLineScroll,
+                 "height": area.bounds.height, "width": area.bounds.width,
+                 "y": area.contentView.bounds.minY, "documentHeight": area.documentView?.bounds.height ?? 0] as [String: Any]
+            }]
         case "menus", "menu":
             guard let main = NSApp.mainMenu else { return ["error": "no menu bar"] }
             NotificationCenter.default.post(name: NSMenu.didBeginTrackingNotification, object: main)

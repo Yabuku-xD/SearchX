@@ -19,9 +19,13 @@ from http.server import ThreadingHTTPServer
 
 ROOT = Path(__file__).resolve().parents[1]
 HELPERS = runpy.run_path(str(ROOT / "Tests/chrome_support.py"))
+parser = argparse.ArgumentParser()
+parser.add_argument("--binary", default=str(ROOT / ".build/debug/Search"))
+parser.add_argument("--output", type=Path)
+args = parser.parse_args()
 server = ThreadingHTTPServer(("127.0.0.1", 0), HELPERS["PageHandler"])
 threading.Thread(target=server.serve_forever, daemon=True).start()
-run = HELPERS["Run"](argparse.Namespace(binary=str(ROOT / ".build/debug/Search"),
+run = HELPERS["Run"](argparse.Namespace(binary=args.binary,
                                      world="wheel-" + uuid.uuid4().hex[:8]),
                      f"http://127.0.0.1:{server.server_port}")
 
@@ -44,6 +48,7 @@ def trace(tab, **wheel):
     run.ask("wheel", **wheel)
     time.sleep(1.0)
     samples = run.js(tab, "window.trace")
+    run.check(len(samples) >= 10, "wheel recording receives foreground animation callbacks")
     start = samples[0][1]
     moved = [(t, y - start) for t, y in samples]
     changes = [t for (t, y), (_, before) in zip(moved[1:], moved) if y != before]
@@ -57,7 +62,11 @@ try:
     tab = run.open("/wheel-glide")
     run.js(tab, "document.body.style.minHeight = '20000px'; true")
     run.ask("resize", width=1100, height=760)
-    time.sleep(0.5)
+    run.ask("native", action="performance", render=True)
+    deadline = time.monotonic() + 3
+    while run.js(tab, "document.hidden") and time.monotonic() < deadline:
+        time.sleep(.1)
+    run.check(not run.js(tab, "document.hidden"), "measured wheel page is visible to WebKit")
 
     flat = trace(tab, pixels=-120)
     run.report["continuous"] = flat
@@ -88,6 +97,42 @@ try:
     run.report["reverse"] = ys
     run.check(max(ys) > 0 and ys[-1] < max(ys) - 60,
               f"a step the other way turns the glide round (peak {max(ys)} pt, end {ys[-1]} pt)")
+
+    # Player settings menus often handle wheel events themselves. Their default
+    # action must remain cancellable even after coarse input is interpolated.
+    run.js(tab, """(() => {
+      window.scrollTo(0, 2000);
+      const menu = document.createElement('div'); menu.id = 'player-menu';
+      menu.style.cssText = 'position:fixed;left:25%;top:25%;width:50%;height:50%;overflow:auto;background:#222';
+      menu.innerHTML = '<div style="height:3000px">Player settings</div>';
+      document.body.append(menu);
+      window.wheelEvents = [];
+      menu.addEventListener('wheel', e => {
+        window.wheelEvents.push({dy:e.deltaY, cancelable:e.cancelable, prevented:e.defaultPrevented});
+        if (window.scriptedMenu) {
+          e.preventDefault(); e.stopPropagation(); menu.scrollTop += e.deltaY;
+        }
+      }, {passive:false});
+      return true;
+    })()""")
+    for scripted in (False, True):
+        for wheel in ({"lines": -3}, {"pixels": -120}):
+            run.js(tab, f"window.scriptedMenu = {str(scripted).lower()}; document.querySelector('#player-menu').scrollTop = 500; window.scrollTo(0,2000); window.wheelEvents = []; true")
+            time.sleep(0.15)
+            before = run.js(tab, "({inner:document.querySelector('#player-menu').scrollTop, outer:window.scrollY})")
+            run.ask("wheel", **wheel)
+            time.sleep(0.65)
+            after = run.js(tab, "({inner:document.querySelector('#player-menu').scrollTop, outer:window.scrollY, events:window.wheelEvents})")
+            case = {"scripted": scripted, "input": wheel, "before": before, "after": after}
+            run.report.setdefault("nested", []).append(case)
+            run.check(after["inner"] > before["inner"] and after["outer"] == before["outer"],
+                      f"{'scripted' if scripted else 'native'} menu consumes {wheel} without moving page")
+            if scripted:
+                run.js(tab, "document.querySelector('#player-menu').scrollTop = 3000; true")
+                run.ask("wheel", **wheel)
+                time.sleep(0.65)
+                edge = run.js(tab, "window.scrollY")
+                run.check(edge == before["outer"], "cancelled menu input stays inside at its boundary")
     run.report["ok"] = True
 except BaseException as error:
     run.report.update(ok=False, error=str(error))
@@ -96,6 +141,7 @@ finally:
     run.stop()
     server.shutdown()
     server.server_close()
-    report = run.directory / "wheel-glide.json"
+    report = args.output or run.directory / "wheel-glide.json"
+    report.parent.mkdir(parents=True, exist_ok=True)
     report.write_text(json.dumps(run.report, indent=2))
     print(f"Report: {report}", flush=True)

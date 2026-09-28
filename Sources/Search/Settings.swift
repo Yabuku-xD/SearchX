@@ -213,6 +213,7 @@ struct SettingsPanel: View {
                     if page == .tabs { WallpaperSettings() }
                 }
                 .padding(.bottom, 4)
+                .background(SettingsScrollTuning())
             }
         }
         .padding(.horizontal, 22)
@@ -271,6 +272,13 @@ struct SettingsPanel: View {
                 .background(Palette.wash, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 .padding(.horizontal, 14)
                 .padding(.bottom, 11)
+            }
+            Rule()
+            Line("Search suggestions", SearchSuggestions.template(for: prefs.engine) == nil
+                 ? "This search engine has no supported suggestion service. History suggestions still appear"
+                 : "Send typed searches to \(prefs.engine.title) for suggestions. Off in private windows") {
+                Switch(on: $prefs.searchSuggestions)
+                    .disabled(SearchSuggestions.template(for: prefs.engine) == nil)
             }
             Rule()
             Line("Site shortcuts", "A word before your search goes straight to that site, whatever engine you've picked. \"yt cats\" searches YouTube") {
@@ -931,6 +939,21 @@ struct SettingsPanel: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
         }
+    }
+}
+
+/// SwiftUI's default ten-point wheel line barely moves a Settings row.
+/// Three lines now move about a row and a half; precise trackpad input,
+/// momentum and controls inside the scroll view keep AppKit's behavior.
+private struct SettingsScrollTuning: NSViewRepresentable {
+    func makeNSView(context: Context) -> TuningView { TuningView() }
+    func updateNSView(_ view: TuningView, context: Context) { view.tune() }
+
+    final class TuningView: NSView {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); tune() }
+        override func layout() { super.layout(); tune() }
+        func tune() { enclosingScrollView?.verticalLineScroll = 30 }
     }
 }
 

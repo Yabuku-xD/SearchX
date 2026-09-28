@@ -37,6 +37,8 @@ FILTERS = """! test filters
 127.0.0.1##.gone:remove()
 127.0.0.1##.inner:has-text(Ad):upward(1)
 127.0.0.1##.styled:style(color: rgb(255, 0, 0) !important)
+127.0.0.1##.stress:has-text(Sponsored)
+127.0.0.1##.stress-parent:has(.stress:has-text(Sponsored)):style(outline-width: 3px)
 ||127.0.0.1^*blockme.js
 ||127.0.0.1^*gtm.js$script,redirect=googletagmanager_gtm.js
 ||127.0.0.1^*/csp$csp=img-src 'none'
@@ -125,6 +127,31 @@ try:
     check('procedural :remove() takes the element out', not p['g1'], p)
     check('procedural :upward(1) hides the parent', p['wrap'] == 'none', p)
     check('procedural :style() applies', p['styled'] == 'rgb(255, 0, 0)', p)
+    h.js(tab, """(() => {
+      window.filterFrames = []; let last = performance.now();
+      const until = last + 3000;
+      function frame(now) { filterFrames.push(now-last); last=now; if(now<until) requestAnimationFrame(frame); }
+      requestAnimationFrame(frame);
+      const root = document.createElement('section'); root.id='stress-root';
+      root.innerHTML = Array.from({length:4000}, (_,i)=>'<article class="stress-parent"><span class="stress">Sponsored '+i+'</span></article>').join('');
+      document.body.append(root); return true;
+    })()""")
+    deadline = time.monotonic() + 15
+    stress = {}
+    while time.monotonic() < deadline:
+        stress = json.loads(h.js(tab, "JSON.stringify({hidden:document.querySelectorAll('.stress[searchx-veil]').length, frames:window.filterFrames})"))
+        if stress['hidden'] == 4000: break
+        time.sleep(.05)
+    check('large procedural result completes without dropping matches', stress.get('hidden') == 4000, stress)
+    evidence['procedural stress'] = stress
+    h.js(tab, "document.querySelector('.stress').textContent='Keep this'; true")
+    deadline = time.monotonic() + 10
+    visible = False
+    while time.monotonic() < deadline:
+        visible = h.js(tab, "getComputedStyle(document.querySelector('.stress')).display !== 'none'")
+        if visible: break
+        time.sleep(.05)
+    check('changed procedural match becomes visible again', visible)
     check('your network filter blocks, the rest loads', not p['blockme'] and p['allowed'], p)
     check('$redirect: stand-in runs, page sees a load', not p['gtm'] and p['gtmLoaded'] and not p['gtmFailed'] and p['callback'], p)
     check('$removeparam: named and /regex/ parameters taken off', p['search'] == '?keep=2', p)

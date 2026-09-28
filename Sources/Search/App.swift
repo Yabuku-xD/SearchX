@@ -297,15 +297,16 @@ private struct MenuLine: View {
     let url: URL
 
     var body: some View {
-        if let host = url.host()?.lowercased(),
-           let icon = Favicons.shared.cached(host) {
-            Label {
+        CachedIcon(host: url.host()?.lowercased() ?? "") { icon in
+            if let icon {
+                Label {
+                    Text(title)
+                } icon: {
+                    Image(nsImage: MenuLine.small(icon))
+                }
+            } else {
                 Text(title)
-            } icon: {
-                Image(nsImage: MenuLine.small(icon))
             }
-        } else {
-            Text(title)
         }
     }
 

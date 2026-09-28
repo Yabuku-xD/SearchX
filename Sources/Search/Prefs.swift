@@ -153,6 +153,9 @@ final class Preferences: ObservableObject {
     @Published var engine: Engine {
         didSet { store.set(engine.rawValue, forKey: "search.engine") }
     }
+    @Published var searchSuggestions: Bool {
+        didSet { store.set(searchSuggestions, forKey: "search.suggestions") }
+    }
     @Published var customEngine: String {
         didSet { store.set(customEngine, forKey: "search.custom") }
     }
@@ -444,6 +447,7 @@ final class Preferences: ObservableObject {
         panelWidth = min(Metrics.panelMax, max(Metrics.panelMin, CGFloat(panel)))
         glyph = store.string(forKey: "glyph").flatMap(Glyph.init) ?? .letters
         engine = store.string(forKey: "search.engine").flatMap(Engine.init) ?? .standard
+        searchSuggestions = store.object(forKey: "search.suggestions") as? Bool ?? true
         customEngine = store.string(forKey: "search.custom") ?? ""
         keywords = store.data(forKey: "search.keywords")
             .flatMap { try? JSONDecoder().decode([Keyword].self, from: $0) } ?? []

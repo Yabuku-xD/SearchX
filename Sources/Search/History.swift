@@ -81,7 +81,8 @@ final class History: ObservableObject {
     /// into the address field included — and sorting the whole history for
     /// it each time cost more than everything else a key press does.
     private var recentCache: [Trace]?
-    private var saving = false
+    private var saving: DispatchWorkItem?
+    private static let writer = DispatchQueue(label: "search.history", qos: .utility)
 
     init() { load() }
 
@@ -254,7 +255,7 @@ final class History: ObservableObject {
             guard let rank = rank(visit.key, against: needle, ascii: ascii) else { continue }
             // The front door before the room inside it: a bare domain is
             // what a bare domain typed into a field means.
-            let score = rank + 4 + frecency(visit, now: now) + (visit.key.contains("/") ? 0 : 1.5)
+            let score = rank + 4 + Self.frecency(visit, now: now) + (visit.key.contains("/") ? 0 : 1.5)
             offer(visit.key, score) {
                 URL(string: visit.url).map { Suggestion(key: visit.key, title: visit.title, url: $0, kind: .visited) }
             }
@@ -320,7 +321,7 @@ final class History: ObservableObject {
 
     /// Often, and lately. A month-old visit counts for about a third of a
     /// fresh one, which is roughly how long a habit takes to stop being one.
-    private func frecency(_ visit: Visit, now: Date) -> Double {
+    nonisolated private static func frecency(_ visit: Visit, now: Date) -> Double {
         let days = max(0, now.timeIntervalSince(visit.last) / 86_400)
         return Double(visit.count) * exp(-days / 30)
     }
@@ -361,28 +362,38 @@ final class History: ObservableObject {
     /// Coalesced: a busy minute of browsing writes the file once, not thirty
     /// times, and never on the main thread.
     private func save() {
-        guard !saving else { return }
-        saving = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+        guard saving == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            saving = false
+            saving = nil
+            write()
+        }
+        saving = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: work)
+    }
+
+    private func write() {
+        let snapshot = visits
+        let folder = History.folder, file = History.file
+        // Copy-on-write keeps this snapshot stable. Ranking, encoding and
+        // ordered atomic writes all belong to the same background worker.
+        Self.writer.async {
             let now = Date()
-            // A cap, so the file can't grow without end. What goes is what has
-            // been visited least and longest ago.
-            let list = self.visits.values
-                .sorted { self.frecency($0, now: now) > self.frecency($1, now: now) }
+            let list = snapshot.values
+                .sorted { Self.frecency($0, now: now) > Self.frecency($1, now: now) }
                 .prefix(2_000)
                 .map { $0 }
-            let folder = History.folder
-            let file = History.file
-            DispatchQueue.global(qos: .utility).async {
-                guard let data = try? JSONEncoder().encode(list) else { return }
-                try? FileManager.default.createDirectory(
-                    at: folder, withIntermediateDirectories: true
-                )
-                try? data.write(to: file, options: .atomic)
-            }
+            guard let data = try? JSONEncoder().encode(list) else { return }
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try? data.write(to: file, options: .atomic)
         }
+    }
+
+    func flush() {
+        saving?.cancel()
+        saving = nil
+        write()
+        Self.writer.sync {}
     }
 
     /// Somewhere to start on the first day, before there is any history to go

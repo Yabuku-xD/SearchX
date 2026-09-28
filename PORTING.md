@@ -129,6 +129,10 @@ Ctrl+Tab, Ctrl+1–9, Alt+←/→, Ctrl+R; tabs are built when first shown;
 the session comes back at the next launch; the ad blocker's rules, compiled
 by WebKitGTK.
 
+Session changes are coalesced on a serial background writer. It does not depend on GLib servicing Dispatch's main queue. Exiting flushes the final state before the process returns; the saved file format is unchanged.
+
+Provider query suggestions, Settings wheel tuning and the saved-picture wake transition are currently implemented in the Mac target. The Linux preview still uses direct address and search navigation without provider completions.
+
 On Ubuntu 24.04 and its relatives:
 
 ```
