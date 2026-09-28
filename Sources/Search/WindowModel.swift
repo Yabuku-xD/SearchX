@@ -533,9 +533,12 @@ final class WindowModel: ObservableObject, Identifiable {
     @discardableResult
     func addTabGroup(containing tab: Tab? = nil) -> UUID {
         let id = UUID()
-        tabGroups.append(TabGroup(id: id, name: "Group \(tabGroups.count + 1)", collapsed: false))
-        editingGroupID = id
-        if let tab { move(tab, toGroup: id) }
+        // The heading opens where it lands, and the tab slides in under it.
+        withAnimation(Motion.settle) {
+            tabGroups.append(TabGroup(id: id, name: "Group \(tabGroups.count + 1)", collapsed: false))
+            editingGroupID = id
+            if let tab { move(tab, toGroup: id) }
+        }
         profile.writeSession()
         return id
     }
@@ -550,7 +553,9 @@ final class WindowModel: ObservableObject, Identifiable {
 
     func toggleTabGroup(_ id: UUID) {
         guard let index = tabGroups.firstIndex(where: { $0.id == id }) else { return }
-        tabGroups[index].collapsed.toggle()
+        // The tabs fold up under the heading as its chevron turns, and come
+        // back down out of it; a second click mid-way sends them back.
+        withAnimation(Motion.settle) { tabGroups[index].collapsed.toggle() }
         profile.writeSession()
     }
 
@@ -562,9 +567,11 @@ final class WindowModel: ObservableObject, Identifiable {
 
     func removeTabGroup(_ id: UUID) {
         guard tabGroups.contains(where: { $0.id == id }) else { return }
-        for tab in tabs where tab.groupID == id { tab.groupID = nil }
-        tabGroups.removeAll { $0.id == id }
-        if profile.prefs.usesTabGroups { arrangeGroupedTabs() }
+        withAnimation(Motion.settle) {
+            for tab in tabs where tab.groupID == id { tab.groupID = nil }
+            tabGroups.removeAll { $0.id == id }
+            if profile.prefs.usesTabGroups { arrangeGroupedTabs() }
+        }
         if editingGroupID == id { editingGroupID = nil }
         profile.writeSession()
     }
@@ -572,10 +579,14 @@ final class WindowModel: ObservableObject, Identifiable {
     func move(_ tab: Tab, toGroup id: UUID?) {
         guard tabs.contains(where: { $0.id == tab.id }), tab.pin == nil, !tab.shy, !tab.bench,
               id == nil || tabGroups.contains(where: { $0.id == id }) else { return }
-        tab.groupID = id
-        if profile.prefs.usesTabGroups { arrangeGroupedTabs() }
-        if let id, let index = tabGroups.firstIndex(where: { $0.id == id }) {
-            tabGroups[index].collapsed = false
+        // Into a group, out of one: the row travels to its new place rather
+        // than vanishing from one and appearing at the other.
+        withAnimation(Motion.settle) {
+            tab.groupID = id
+            if profile.prefs.usesTabGroups { arrangeGroupedTabs() }
+            if let id, let index = tabGroups.firstIndex(where: { $0.id == id }) {
+                tabGroups[index].collapsed = false
+            }
         }
         profile.writeSession()
     }

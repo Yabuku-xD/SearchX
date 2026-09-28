@@ -413,6 +413,7 @@ struct BookmarkOutline: View {
                     // Type-erased: a view that calls itself can't let Swift
                     // infer its own opaque return type from its own body.
                     AnyView(rows(kids, depth: depth + 1, parent: node.id))
+                        .transition(.tuck)
                 } else {
                     Text("Empty")
                         .font(.system(size: 12))
@@ -425,7 +426,10 @@ struct BookmarkOutline: View {
     }
 
     private func toggle(_ id: Bookmark.ID) {
-        if expanded.contains(id) { expanded.remove(id) } else { expanded.insert(id) }
+        // Its contents fold up under the folder and come back down out of it.
+        withAnimation(Motion.settle) {
+            if expanded.contains(id) { expanded.remove(id) } else { expanded.insert(id) }
+        }
     }
 
     /// A name left empty, or an address that isn't one, keeps what was there.

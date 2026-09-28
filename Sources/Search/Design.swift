@@ -184,6 +184,44 @@ enum Motion {
     }
 }
 
+/// Part of a transition: a little way off, a little blurred, see-through.
+/// Transitions that travel a few points read as the thing arriving from where
+/// it belongs; `.move(edge:)` travels the whole container and reads as it
+/// flying in from off screen.
+struct Drift: ViewModifier {
+    var y: CGFloat = 0
+    var blur: CGFloat = 0
+    var opacity: Double = 1
+
+    func body(content: Content) -> some View {
+        content
+            .offset(y: y)
+            .blur(radius: blur)
+            .opacity(opacity)
+    }
+}
+
+extension AnyTransition {
+    /// Something that says one thing from an edge: in from a short way past
+    /// it (positive `from` is below, negative above), out along the same
+    /// path but a shorter way, blurring as it goes — an exit quieter than its
+    /// arrival.
+    static func rise(from: CGFloat = 12) -> AnyTransition {
+        .asymmetric(
+            insertion: .modifier(active: Drift(y: from, opacity: 0), identity: Drift()),
+            removal: .modifier(active: Drift(y: from / 2, blur: 4, opacity: 0), identity: Drift())
+        )
+    }
+
+    /// A group's tab, folding up under its heading and coming back down out
+    /// of it: the same path both ways, so where the tabs went is where they
+    /// come from.
+    static let tuck = AnyTransition.asymmetric(
+        insertion: .modifier(active: Drift(y: -8, opacity: 0), identity: Drift()),
+        removal: .modifier(active: Drift(y: -6, blur: 2, opacity: 0), identity: Drift())
+    )
+}
+
 /// Press feedback without moving glyphs or changing their optical alignment.
 struct ChromeButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {

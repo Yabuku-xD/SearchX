@@ -242,7 +242,7 @@ struct StoreOffer: View {
                 .background(Palette.ground, in: Capsule())
                 .overlay(Capsule().strokeBorder(Palette.hairline, lineWidth: 1))
                 .shadow(color: .black.opacity(0.12), radius: 20, y: 6)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .transition(.rise())
             }
         }
     }

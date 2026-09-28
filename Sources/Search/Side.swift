@@ -796,6 +796,7 @@ private struct PinSquare: View {
         .contextMenu { TabMenu(window: window, tab: tab, close: { window.close(tab) }) }
         .help(tab.label)
         .animation(Motion.quick, value: hovering)
+        .animation(Motion.quick, value: tab.asleep)
         .transition(settled ? .scale(scale: 0.8).combined(with: .opacity) : .identity)
     }
 }
@@ -939,6 +940,8 @@ private struct SideRow: View, Equatable {
         }
         .animation(Motion.quick, value: tab.loading)
         .animation(Motion.quick, value: speaker)
+        // Put to sleep or woken: the icon dims or brightens, not blinks.
+        .animation(Motion.quick, value: tab.asleep)
         .background { ground }
         .modifier(Shake(travel: shake))
         .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
@@ -1070,6 +1073,10 @@ struct Door: View {
         Button(action: act) {
             Image(systemName: Symbols.current(icon))
                 .font(.system(size: 12, weight: .medium))
+                // One icon becoming another — reload to stop, an empty
+                // bookmark to a kept one — as the system's own symbols do it.
+                .contentTransition(.symbolEffect(.replace))
+                .animation(Motion.quick, value: icon)
                 .foregroundStyle(on ? Palette.ink : (hovering ? Palette.ink.opacity(0.7) : Palette.muted))
                 .frame(width: 26, height: 26)
                 .background(
@@ -1148,7 +1155,22 @@ private enum SideItem: Identifiable {
                     if nesting.grouped { GroupLine(last: nesting.last) }
                 }
                 .padding(.top, nesting.opens ? SideItem.sectionGap : 0)
+                .modifier(Arrival(grouped: nesting.grouped))
         }
+    }
+}
+
+/// How a row comes and goes. A group's tabs fold up under its heading and
+/// come back down out of it; any other row grows in from where its title
+/// starts, as a new tab does. Nothing moves while the column first draws.
+private struct Arrival: ViewModifier {
+    @Environment(\.columnSettled) private var settled
+    let grouped: Bool
+
+    func body(content: Content) -> some View {
+        content.transition(!settled ? .identity
+            : grouped ? .tuck
+            : .scale(scale: 0.94, anchor: .leading).combined(with: .opacity))
     }
 }
 

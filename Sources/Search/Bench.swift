@@ -1268,6 +1268,9 @@ final class Bench {
             case "peek": browser.key?.peek(true)
             case "unpeek": browser.key?.peek(false)
             case "fold": browser.key?.toggleFold()
+            // The first group folding its tabs away, or bringing them back.
+            case "collapse":
+                if let window = browser.key, let group = window.tabGroups.first { window.toggleTabGroup(group.id) }
             default: break
             }
 

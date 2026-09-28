@@ -567,19 +567,20 @@ struct ContentView: View {
             announcement
             if let ask = browser.asking {
                 captureAsking(ask)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(.rise())
             }
             if let offer = browser.offering {
                 keepAsking(offer)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(.rise())
             }
             StoreOffer(window: window)
             if browser.veiling {
                 hint("Click anything to hide it   ⌘Z undo   esc done")
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(.rise())
             }
         }
         .padding(.bottom, 30)
+        .animation(Motion.settle, value: browser.announcement)
         .animation(Motion.settle, value: browser.veiling)
         .animation(Motion.settle, value: browser.asking)
         .animation(Motion.settle, value: browser.offering)
@@ -695,10 +696,12 @@ struct ContentView: View {
             .overlay { field }
             .overlay { panels }
             .overlay { switcher }
-            // The field comes on its spring, and goes quickly: once Return
-            // is pressed the page is on its way, and the field is not what
+            // The field is there the moment ⌘L or ⌘K is pressed — it opens
+            // many times a day, from the keyboard, and a spring in front of
+            // the typing is a wait — and goes quickly: once Return is
+            // pressed the page is on its way, and the field is not what
             // there is to watch.
-            .animation(window.fieldShowing ? Motion.settle : Motion.quick, value: window.fieldShowing)
+            .animation(window.fieldShowing ? nil : Motion.quick, value: window.fieldShowing)
             .background(WindowSetup { host = $0; dress($0) })
             .onChange(of: browser.prefs.topBarHeight) { _, _ in
                 guard let host else { return }
@@ -740,15 +743,17 @@ struct ContentView: View {
                 }
             }
             .onChange(of: window.activeID) { _, _ in handBack() }
-            .animation(Motion.settle, value: browser.recalling)
-            .animation(Motion.settle, value: browser.hoarding)
-            .animation(Motion.settle, value: browser.tuning)
-            .animation(Motion.settle, value: browser.welcoming)
-            .animation(Motion.settle, value: browser.bookmarking)
-            .animation(Motion.settle, value: browser.managing)
-            .animation(Motion.settle, value: browser.reviewing)
-            .animation(Motion.settle, value: browser.blockering)
-            .animation(Motion.settle, value: browser.theming)
+            // Each panel arrives on the spring and leaves quickly: once it is
+            // done with, the page under it is what there is to look at.
+            .animation(browser.recalling ? Motion.settle : Motion.quick, value: browser.recalling)
+            .animation(browser.hoarding ? Motion.settle : Motion.quick, value: browser.hoarding)
+            .animation(browser.tuning ? Motion.settle : Motion.quick, value: browser.tuning)
+            .animation(browser.welcoming ? Motion.settle : Motion.quick, value: browser.welcoming)
+            .animation(browser.bookmarking ? Motion.settle : Motion.quick, value: browser.bookmarking)
+            .animation(browser.managing ? Motion.settle : Motion.quick, value: browser.managing)
+            .animation(browser.reviewing ? Motion.settle : Motion.quick, value: browser.reviewing)
+            .animation(browser.blockering != nil ? Motion.settle : Motion.quick, value: browser.blockering)
+            .animation(browser.theming ? Motion.settle : Motion.quick, value: browser.theming)
             .onChange(of: window.space.theme != nil) { _, _ in glaze(host) }
             .onChange(of: windowTinted) { _, _ in glaze(host) }
         .onAppear {
@@ -789,8 +794,7 @@ struct ContentView: View {
                 .background(Palette.ground, in: Capsule())
                 .overlay(Capsule().strokeBorder(Palette.hairline, lineWidth: 1))
                 .shadow(color: .black.opacity(0.10), radius: 18, y: 6)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-                .animation(Motion.settle, value: browser.announcement)
+                .transition(.rise())
         }
     }
 

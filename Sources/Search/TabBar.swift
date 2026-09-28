@@ -484,6 +484,7 @@ private struct TabPill: View {
         .animation(Motion.quick, value: hovering)
         .animation(Motion.glide, value: editing)
         .animation(Motion.glide, value: tab.pin)
+        .animation(Motion.quick, value: tab.asleep)
         .onChange(of: window.refusals) { _, _ in
             guard editing else { return }
             shake = 0

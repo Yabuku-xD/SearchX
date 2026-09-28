@@ -247,6 +247,7 @@ Each end-to-end check runs its own temporary app and profile, and saves screensh
 | `python3 Tests/popup-live.py` | Pop-ups on live sites, blocker on, lists off and off |
 | `python3 Tests/smoothness.py` | Scrolling, sidebar slides and tab switches, frame by frame |
 | `python3 Tests/sidebar-scale.py` | The same with 150 tabs, plus typing and resizing |
+| `python3 Tests/group-motion.py` | A group folding and unfolding, filmed frame by frame |
 | `python3 Tests/weigh.py` | The numbers at the top of this page |
 
 </details>

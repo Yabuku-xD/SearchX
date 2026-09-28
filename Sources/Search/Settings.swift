@@ -1105,7 +1105,8 @@ struct Pill: View {
                 .contentShape(Capsule())
                 .overlay(Capsule().strokeBorder(focused ? Color.accentColor : .clear, lineWidth: 2))
         }
-        .buttonStyle(ChromeButtonStyle())
+        // Pressed, it gives a little under the pointer (see Press).
+        .buttonStyle(Press())
         .focused($focused)
         .opacity(enabled ? 1 : 0.45)
         .onHover { hovering = $0 }
