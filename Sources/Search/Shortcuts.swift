@@ -180,6 +180,7 @@ struct ShortcutCommand: Identifiable {
         ShortcutCommand("view.float", "Float Video", .view, KeyCombo("p", shift: true)) { browser, _ in browser.toggleFloat() },
         ShortcutCommand("view.hide", "Hide Elements…", .view, KeyCombo("h", shift: true)) { browser, _ in browser.toggleHiding() },
         ShortcutCommand("view.hidden", "Hidden on This Site…", .view, KeyCombo("u", shift: true)) { browser, _ in browser.reviewing.toggle() },
+        ShortcutCommand("view.blockerLog", "Blocker Log…", .view, nil) { browser, _ in browser.blockering = browser.blockering == nil ? .log : nil },
         ShortcutCommand("view.zoomIn", "Zoom In", .view, KeyCombo("+")) { _, window in window.zoom(by: 1.1) },
         ShortcutCommand("view.zoomOut", "Zoom Out", .view, KeyCombo("-")) { _, window in window.zoom(by: 1 / 1.1) },
         ShortcutCommand("view.actualSize", "Actual Size", .view, KeyCombo("0")) { _, window in window.resetZoom() },

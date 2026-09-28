@@ -148,6 +148,8 @@ final class Browser: NSObject, ObservableObject {
     @Published var reviewing = false {
         didSet { if !reviewing { stopPeeking() } }
     }
+    /// The blocker's panel — its log, your filters, your rules — when it is up.
+    @Published var blockering: BlockerPage?
 
     var hereHost: String? { curtain.host(of: key?.active?.address) }
     var hereVeils: [Veil] { curtain.veils(on: hereHost) }
@@ -565,12 +567,14 @@ final class Browser: NSObject, ObservableObject {
         Shield.shared.listsOn = prefs.filterLists
         Shield.shared.compile()
         Filters.shared.start()
+        OwnFilters.shared.start()
         // uBO's lists, the moment they are compiled or updated: every open
         // page is given them, rather than the pages opened from then on.
-        Filters.shared.$generation
+        Filters.shared.$generation.combineLatest(OwnFilters.shared.$generation)
             .dropFirst()
             .sink { [weak self] _ in
                 guard let self else { return }
+                Shield.shared.forgetExtras()
                 Shield.shared.apply(to: allTabs.compactMap { tab in
                     tab.built.map { ($0.configuration.userContentController, tab.address?.host()?.lowercased()) }
                 })
@@ -1412,6 +1416,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
                [.linkActivated, .other].contains(action.navigationType),
                let clean = Shield.shared.cleaned(url) {
                 decisionHandler(.cancel)
+                tab.blockLog.add(.init(kind: .cleaned, url: url, source: "Parameters taken off"))
                 webView.load(URLRequest(url: clean))
                 return
             }
@@ -1599,6 +1604,13 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
             decisionHandler(.allow)
             return
         }
+        // A document or frame the filters refuse for a header it carries.
+        if let http = response.response as? HTTPURLResponse,
+           Shield.shared.refuses(http, top: response.isForMainFrame ? nil : webView.url) {
+            if let tab = tab(for: webView), let url = http.url { tab.blockLog.add(.init(kind: .header, url: url, source: "Filters")) }
+            decisionHandler(.cancel)
+            return
+        }
         // A server that says "attachment" means a file to keep, even one
         // WebKit could show. Gmail's download button loads the attachment
         // into a hidden frame and counts on exactly that: a PDF shown there
@@ -1738,6 +1750,20 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         guard let owner = tab.owner, owner.activeID != tab.id else { return }
         owner.select(tab)
         host(of: owner)?.makeKeyAndOrderFront(nil)
+    }
+
+    /// What a rule list did to a load, for the tab's log. WebKit tells a
+    /// browser this (Safari's privacy report reads the same); it names the
+    /// list, not the line of it.
+    @objc(_webView:contentRuleListWithIdentifier:performedAction:forURL:)
+    func webView(_ webView: WKWebView, contentRuleListWithIdentifier identifier: String, performedAction action: NSObject, forURL url: URL) {
+        guard let tab = tab(for: webView) else { return }
+        let did = { (key: String) in (action.value(forKey: key) as? Bool) == true }
+        let kind: BlockLog.Kind = did("blockedLoad") ? .blocked : did("blockedCookies") ? .cookies
+            : did("madeHTTPS") ? .upgraded : did("redirected") ? .redirected : did("modifiedHeaders") ? .headers : .blocked
+        // A css-display-none rule reports nothing worth a line.
+        guard did("blockedLoad") || did("blockedCookies") || did("madeHTTPS") || did("redirected") || did("modifiedHeaders") else { return }
+        tab.blockLog.add(.init(kind: kind, url: url, source: BlockLog.name(of: identifier)))
     }
 
     func webViewDidClose(_ webView: WKWebView) {

@@ -68,6 +68,9 @@ final class Filters: ObservableObject {
     @Published private(set) var status = Status()
     private(set) var lists: [WKContentRuleList] = []
     private(set) var table = FilterCompiler.ScriptletTable()
+    /// What the lists ask of SearchX itself: procedural filters, $removeparam
+    /// and the rest (see FilterCompiler.Extras).
+    private(set) var extras = FilterCompiler.Extras()
     private(set) var popupHosts = Set<String>()
     /// Goes up whenever a new set of lists is in place, for open pages to
     /// be given them.
@@ -81,9 +84,14 @@ final class Filters: ObservableObject {
         var counts: [String: Int]
         var updated: Date
         var tags: [String: String]
+        var extras: FilterCompiler.Extras?
     }
 
     nonisolated static let prefix = "office-filters-"
+    /// Your exceptions and allow rules, which have to be in every list to
+    /// undo its blocks (one WebKit list can't undo another's); read by
+    /// FilterWorker from the lists folder.
+    nonisolated static let overridesFile = "overrides.json"
     private var folder: URL { Store.file("filters") }
     private var manifestFile: URL { folder.appendingPathComponent("compiled.json") }
     /// The compiled lists live with the profile's other filter files, where
@@ -121,6 +129,7 @@ final class Filters: ObservableObject {
     private func install(_ found: [WKContentRuleList], _ manifest: Manifest) {
         lists = found
         table = manifest.table
+        extras = manifest.extras ?? FilterCompiler.Extras()
         popupHosts = Set(manifest.popupHosts)
         status.updated = manifest.updated
         status.rules = manifest.counts.filter { $0.key.hasPrefix("rules-") }.values.reduce(0, +)
@@ -141,14 +150,25 @@ final class Filters: ObservableObject {
     }
 
     /// Fetches the lists that changed, has them compiled, puts them in place.
-    func update(force: Bool = false) async {
-        guard !status.working else { return }
+    /// \`refetch: false\` compiles the copies on disk again — for your
+    /// exceptions and allow rules, which change what every list ends with.
+    func update(force: Bool = false, refetch: Bool = true) async {
+        guard !status.working else { pendingRecompile = pendingRecompile || !refetch; return }
         status.working = true
         status.trouble = nil
-        defer { status.working = false }
+        defer {
+            status.working = false
+            if pendingRecompile {
+                pendingRecompile = false
+                Task { await update(force: true, refetch: false) }
+            }
+        }
         let folder = self.folder
         let previous = (try? Data(contentsOf: manifestFile)).flatMap { try? JSONDecoder().decode(Manifest.self, from: $0) }
-        let fetched = await Filters.fetch(into: folder, tags: previous?.tags ?? [:])
+        let fetched = refetch
+            ? await Filters.fetch(into: folder, tags: previous?.tags ?? [:])
+            : (present: Filters.sources.filter { FileManager.default.fileExists(atPath: folder.appendingPathComponent($0.id + ".txt").path) }.count,
+               tags: previous?.tags ?? [:], changed: true)
         guard fetched.present > 0 else {
             status.trouble = "The filter lists couldn’t be downloaded. The built-in list is still on."
             return
@@ -171,7 +191,8 @@ final class Filters: ObservableObject {
         }
         try? FileManager.default.removeItem(at: resultFile)
         let manifest = Manifest(identifiers: result.identifiers, table: result.table, popupHosts: result.popupHosts,
-                                counts: result.counts, updated: Date(), tags: fetched.tags)
+                                counts: result.counts, updated: refetch ? Date() : (previous?.updated ?? Date()),
+                                tags: fetched.tags, extras: result.extras)
         write(manifest)
         install(found, manifest)
         Filters.forget(keeping: Set(manifest.identifiers), in: store)
@@ -182,6 +203,20 @@ final class Filters: ObservableObject {
         guard let data = try? JSONEncoder().encode(manifest) else { return }
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try? data.write(to: manifestFile, options: .atomic)
+    }
+
+    /// Asked for while a compile was running: one more once it's done.
+    private var pendingRecompile = false
+
+    /// Your exceptions and allow rules as every list is to end with them;
+    /// the lists are compiled again when they changed.
+    func setOverrides(_ rules: [String]) {
+        let file = folder.appendingPathComponent(Filters.overridesFile)
+        let old = (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode([String].self, from: $0) } ?? []
+        guard old != rules else { return }
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? JSONEncoder().encode(rules).write(to: file, options: .atomic)
+        Task { await update(force: true, refetch: false) }
     }
 
     /// Search again, as FilterWorker, at low priority; true when it finished

@@ -64,7 +64,8 @@ final class Shield: ObservableObject {
     /// The built-in list and uBO's lists (see Filters), whichever are ready.
     private var everything: [WKContentRuleList] {
         guard listsOn else { return [] }
-        return (list.map { [$0] } ?? []) + Filters.shared.lists
+        // Yours after uBO's, your rules last (see OwnFilters).
+        return (list.map { [$0] } ?? []) + Filters.shared.lists + OwnFilters.shared.lists
     }
 
     /// What each controller was last given: the lists in place when it was
@@ -87,7 +88,72 @@ final class Shield: ObservableObject {
     /// off.
     func scriptlets(for host: String, top: String?) -> [[String]] {
         guard enabled, listsOn, !isPaused(on: top ?? host) else { return [] }
-        return Scriptlets.calls(for: host, top: top == host ? nil : top, in: Filters.shared.table)
+        let other = top == host ? nil : top
+        return Scriptlets.calls(for: host, top: other, in: Filters.shared.table)
+            + Scriptlets.calls(for: host, top: other, in: OwnFilters.shared.table)
+    }
+
+    /// The lists' extras and yours, as one table; made again when either changes.
+    private var mergedExtras: FilterCompiler.Extras?
+    var extras: FilterCompiler.Extras {
+        if let mergedExtras { return mergedExtras }
+        let made = Filters.shared.extras.merged(with: OwnFilters.shared.extras)
+        mergedExtras = made
+        return made
+    }
+    func forgetExtras() {
+        mergedExtras = nil
+        sharedCache = nil
+    }
+
+    /// The redirect rules for every site with a stand-in SearchX has.
+    private var sharedCache: [[String: String]]?
+    var sharedRedirects: [[String: String]] {
+        if let sharedCache { return sharedCache }
+        let made = RuleMatch.forPage(extras.redirect, host: "") {
+            $0.ifDomain.isEmpty && ($0.exception || PageFilters.Stubs.all[$0.value] != nil)
+        }
+        sharedCache = made
+        return made
+    }
+
+    /// A document or frame refused for a header its response carries
+    /// (uBO's $header) — never on a protected page or in a protected frame.
+    func refuses(_ response: HTTPURLResponse, top: URL?) -> Bool {
+        guard enabled, listsOn, let url = response.url, !Protected.page(url), !(top.map(Protected.page) ?? false),
+              !isPaused(on: top?.host()?.lowercased() ?? url.host()?.lowercased()) else { return false }
+        let rules = extras.header
+        guard !rules.isEmpty else { return false }
+        return RuleMatch.refuses(response, url: url, context: top?.host()?.lowercased(), in: rules)
+    }
+
+    /// What SearchX's own scripts do in a document at \`url\` on a page at
+    /// \`top\` (see PageFilters): nothing where the blocker is off, and
+    /// nothing on a sign-in, passkey, captcha or payment page or in such a
+    /// frame (see Protected).
+    func work(for url: URL, top: URL?) -> PageFilters.Work {
+        guard enabled, let host = url.host()?.lowercased(), !host.isEmpty,
+              !isPaused(on: top?.host()?.lowercased() ?? host),
+              !Protected.page(url), !(top.map(Protected.page) ?? false) else { return PageFilters.Work() }
+        var work = PageFilters.Work()
+        work.shared = listsOn
+        if listsOn {
+            let extras = self.extras
+            work.procedural = PageFilters.procedural(for: host, in: extras)
+            // Only the stand-ins SearchX has; the rest are plain blocks. The
+            // ones for every site go to a page once (sharedRedirects).
+            work.redirect = RuleMatch.forPage(extras.redirect, host: host) {
+                !$0.ifDomain.isEmpty && ($0.exception || PageFilters.Stubs.all[$0.value] != nil)
+            }
+            work.replace = RuleMatch.forPage(extras.replace, host: host, ownSite: true)
+            if top == nil || top == url { work.csp = RuleMatch.policies(for: url, in: extras.csp) }
+        }
+        // Your rule against a site's inline scripts: only scripts from
+        // somewhere, none written into the page.
+        if top == nil || top == url, PageFilters.siteNames(host).contains(where: OwnFilters.shared.inlineBlocked.contains) {
+            work.csp.append("script-src * blob: data: 'unsafe-eval'")
+        }
+        return work
     }
 
     func compile() {
@@ -158,14 +224,26 @@ final class Shield: ObservableObject {
     }
 
     /// A page's address without the parameters that only say where a click
-    /// came from — uBO's removeparam. Nil when there is nothing to take off,
-    /// or the blocker is off there.
+    /// came from — uBO's removeparam, the lists' and yours, and the built-in
+    /// set. Nil when there is nothing to take off, the blocker is off there,
+    /// or it is a sign-in, passkey or payment address, whose parameters
+    /// carry what the sign-in or payment needs (see Protected).
     func cleaned(_ url: URL) -> URL? {
         guard enabled, !isPaused(on: url.host()?.lowercased()),
+              !Protected.page(url),
               var parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let items = parts.queryItems, !items.isEmpty
         else { return nil }
-        let kept = items.filter { !ShieldRules.isTracking(parameter: $0.name) }
+        let listed = listsOn ? RuleMatch.removals(for: url, in: extras.removeparam) : .none
+        if case .all = listed {
+            parts.queryItems = nil
+            return parts.url
+        }
+        let kept = items.filter { item in
+            if ShieldRules.isTracking(parameter: item.name) { return false }
+            if case .some(let removals) = listed { return !removals.contains { $0.removes(item) } }
+            return true
+        }
         guard kept.count != items.count else { return nil }
         parts.queryItems = kept.isEmpty ? nil : kept
         return parts.url

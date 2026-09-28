@@ -20,6 +20,7 @@ enum FilterWorker {
         var table: FilterCompiler.ScriptletTable
         var popupHosts: [String]
         var counts: [String: Int]
+        var extras: FilterCompiler.Extras?
     }
 
     /// When this process was started to compile, compiles and exits;
@@ -32,23 +33,28 @@ enum FilterWorker {
         let resultFile = URL(fileURLWithPath: arguments[4])
         try? FileManager.default.createDirectory(at: storeFolder, withIntermediateDirectories: true)
         guard let store = WKContentRuleListStore(url: storeFolder) else { exit(2) }
-        let sources = Filters.sources.compactMap { source -> (group: String, text: String)? in
+        let sources = Filters.sources.compactMap { source -> (group: String, text: String, trusted: Bool)? in
             let file = lists.appendingPathComponent(source.id + ".txt")
-            return (try? String(contentsOf: file, encoding: .utf8)).map { (group: source.group, text: $0) }
+            // uBO's own lists are the ones uBO trusts.
+            return (try? String(contentsOf: file, encoding: .utf8)).map { (group: source.group, text: $0, trusted: source.id.hasPrefix("ublock-")) }
         }
         guard !sources.isEmpty else { exit(3) }
-        attempt(sources, modern: true, store: store, resultFile: resultFile)
+        // Your exceptions and allow rules (see Filters.overrides), then the
+        // hosts nothing may block, last in every list.
+        let overrides = (try? Data(contentsOf: lists.appendingPathComponent(Filters.overridesFile)))
+            .flatMap { try? JSONDecoder().decode([String].self, from: $0) } ?? []
+        attempt(sources, modern: true, closing: overrides + Protected.rules(pages: false), store: store, resultFile: resultFile)
         RunLoop.main.run()
     }
 
     /// Modern resource type names first; an older WebKit that refuses them
     /// gets the older names. One list at a time, each list's text let go
     /// once it is compiled: the peak is the largest list's, not all three's.
-    private static func attempt(_ sources: [(group: String, text: String)], modern: Bool,
+    private static func attempt(_ sources: [(group: String, text: String, trusted: Bool)], modern: Bool, closing: [String],
                                 store: WKContentRuleListStore, resultFile: URL) {
-        let output = FilterCompiler.compile(sources, modernTypes: modern)
+        let output = FilterCompiler.compile(sources, modernTypes: modern, closing: closing)
         var pending = output.lists.sorted { $0.key < $1.key }.map { (group: $0.key, json: $0.value) }
-        var result = Result(identifiers: [], table: output.scriptlets, popupHosts: output.popupHosts, counts: output.counts)
+        var result = Result(identifiers: [], table: output.scriptlets, popupHosts: output.popupHosts, counts: output.counts, extras: output.extras)
         guard !pending.isEmpty else { exit(3) }
         func next() {
             guard !pending.isEmpty else {
@@ -60,7 +66,7 @@ enum FilterWorker {
             let identifier = Filters.prefix + group + "-" + Filters.digest(json)
             let finish: (Bool) -> Void = { ok in
                 guard ok else {
-                    if modern { attempt(sources, modern: false, store: store, resultFile: resultFile) } else { exit(5) }
+                    if modern { attempt(sources, modern: false, closing: closing, store: store, resultFile: resultFile) } else { exit(5) }
                     return
                 }
                 result.identifiers.append(identifier)

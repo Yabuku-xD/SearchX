@@ -397,6 +397,12 @@ final class Bench {
             }
 
         case "eval":
+            if request["log"] as? Bool == true {
+                // The tab's blocker log (see BlockLog), newest last.
+                guard let tab = find(request, in: browser) else { answer(missing(request)); return }
+                answer(["entries": tab.blockLog.entries.map { ["kind": $0.kind.rawValue, "url": $0.url.absoluteString, "source": $0.source] }])
+                return
+            }
             guard let tab = find(request, in: browser) else { answer(missing(request)); return }
             guard let js = request["js"] as? String else { answer(["error": "eval needs js"]); return }
             house(tab)
@@ -1498,6 +1504,7 @@ final class Bench {
             if let on = request["downloads"] as? Bool { browser.hoarding = on }
             if let on = request["bookmarks"] as? Bool { browser.bookmarking = on }
             if let on = request["hidden"] as? Bool { browser.reviewing = on }
+            if let page = request["blocker"] as? String { browser.blockering = BlockerPage(rawValue: page) }
             if let look = (request["look"] as? String).flatMap(Look.init) { browser.prefs.look = look }
             if let side = request["side"] as? String {
                 guard let position = SidebarPosition(rawValue: side) else {

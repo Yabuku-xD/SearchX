@@ -39,7 +39,7 @@ and private because it has nowhere to send your data.
 <td valign="top" width="50%">
 
 ### 🛡 Blocking, built in
-uBlock Origin's default lists, kept current and enforced inside WebKit's networking, so ads and trackers are never even requested. Scriptlets stop pop-unders and anti-adblock walls. Pop-up blocking also watches **behaviour**: a window opened without a real click, or a click hijacked into an ad tab, is stopped on sites no list has ever named. Tracking parameters like `utm_`, `fbclid` and `gclid` are removed from links. WebKit's own fingerprinting protection, the one Safari uses, is on in private windows and can be turned on everywhere. A site that breaks gets **Compatibility Mode** from its name in the address field: blocking, fingerprinting protection and extensions stand aside for that site alone.
+uBlock Origin's default lists, kept current and enforced inside WebKit's networking, so ads and trackers are never even requested. Scriptlets stop pop-unders and anti-adblock walls. The parts of uBO's syntax WebKit's blocker can't run, SearchX runs itself: **procedural filters** (`:has-text`, `:upward`, `:xpath`, `:remove`, `:style`…), `$removeparam`, `$csp`, `$header`, `$replace` and `$redirect` stand-ins. Write **your own filters**, set **rules** the way uBO's dynamic filtering does (`example.com * 3p-script block`), and see what was stopped in the **Blocker log** (View › Blocker Log…). None of it ever acts on sign-in, passkey, captcha or payment pages. Pop-up blocking also watches **behaviour**: a window opened without a real click, or a click hijacked into an ad tab, is stopped on sites no list has ever named. Tracking parameters like `utm_`, `fbclid` and `gclid` are removed from links. WebKit's own fingerprinting protection, the one Safari uses, is on in private windows and can be turned on everywhere. A site that breaks gets **Compatibility Mode** from its name in the address field: blocking, fingerprinting protection and extensions stand aside for that site alone.
 
 </td>
 <td valign="top" width="50%">
@@ -200,6 +200,8 @@ SwiftUI draws the interface, AppKit handles the window chrome, and WKWebView sho
 | File | Job |
 |---|---|
 | `Shield.swift`, `Filters.swift` | Blocking |
+| `OwnFilters.swift`, `PageFilters.swift`, `RuleMatch.swift`, `BlockLog.swift` | Your filters and rules, what SearchX does beyond WebKit's blocker, the log |
+| `Protected.swift` | The sign-in, passkey, captcha and payment pages nothing new touches |
 | `FilterCompiler.swift`, `FilterWorker.swift` | Compiling filter lists in a short-lived helper process |
 | `Scriptlets.swift`, `Intent.swift` | Scriptlets and behaviour-based pop-up blocking |
 | `Wallpaper.swift`, `PixelArt.swift`, `Beam.swift` | The new tab picture and the address field light |

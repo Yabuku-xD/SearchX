@@ -38,6 +38,45 @@ enum FilterCompiler {
         /// Hosts whose pop-ups never open, from $popup/$popunder/$all filters.
         var popupHosts: [String]
         var counts: [String: Int]
+        /// What WebKit's blocker can't do, done by SearchX (see Extras).
+        var extras = Extras()
+    }
+
+    /// A network filter whose work is not WebKit's blocker's: where it
+    /// applies (a pattern over the address, nil for any; the sites it is on
+    /// or off), and what it says.
+    struct NetRule: Codable, Hashable {
+        var pattern: String?
+        var ifDomain: [String] = []
+        var unlessDomain: [String] = []
+        var value = ""
+        var exception = false
+    }
+
+    /// The parts of uBO's syntax SearchX carries out itself: procedural
+    /// cosmetic filters (by site), and $removeparam, $csp, $header,
+    /// $replace and $redirect.
+    struct Extras: Codable {
+        var procedural: [String: [String]] = [:]
+        var proceduralOff: [String: [String]] = [:]
+        var removeparam: [NetRule] = []
+        var csp: [NetRule] = []
+        var header: [NetRule] = []
+        var replace: [NetRule] = []
+        var redirect: [NetRule] = []
+
+        /// Two tables as one: lists' and yours.
+        func merged(with other: Extras) -> Extras {
+            var out = self
+            out.procedural.merge(other.procedural) { $0 + $1 }
+            out.proceduralOff.merge(other.proceduralOff) { $0 + $1 }
+            out.removeparam += other.removeparam
+            out.csp += other.csp
+            out.header += other.header
+            out.replace += other.replace
+            out.redirect += other.redirect
+            return out
+        }
     }
 
     struct ScriptletTable: Codable {
@@ -54,10 +93,27 @@ enum FilterCompiler {
 
     /// Where each list goes. Exceptions go into every list: one list's
     /// exception cannot reach another list's rule.
-    static func compile(_ sources: [(group: String, text: String)], modernTypes: Bool = true) -> Output {
+    /// A source is \`trusted\` when its filters may do what uBO lets only its
+    /// own lists and yours do ($replace). \`closing\`: rules put last in every
+    /// list, after its exceptions and what no exception undoes — your
+    /// exceptions and allow rules, then the protected hosts (see Protected).
+    static func compile(_ sources: [(group: String, text: String, trusted: Bool)], modernTypes: Bool = true,
+                        closing: [String] = []) -> Output {
         var parser = Parser(modernTypes: modernTypes)
-        for source in sources { parser.read(source.text, group: source.group) }
+        parser.closing = closing
+        for source in sources { parser.read(source.text, group: source.group, trusted: source.trusted) }
         return parser.finish()
+    }
+
+    /// Whether one line is a filter this compiler uses — for pointing at the
+    /// ones in your filters it doesn't.
+    static func understands(_ line: String) -> Bool {
+        let output = compile([(group: "check", text: line, trusted: true)])
+        let extras = output.extras
+        return !output.lists.isEmpty || !output.scriptlets.calls.isEmpty || !output.scriptlets.off.isEmpty
+            || !extras.procedural.isEmpty || !extras.proceduralOff.isEmpty || !extras.removeparam.isEmpty
+            || !extras.csp.isEmpty || !extras.header.isEmpty || !extras.replace.isEmpty || !extras.redirect.isEmpty
+            || !output.popupHosts.isEmpty
     }
 
     // MARK: - parsing
@@ -72,7 +128,9 @@ enum FilterCompiler {
         var exceptions: [String] = []
         var seen = Set<String>()
         var badfilters = Set<String>()
-        var pending: [(line: String, group: String)] = []
+        var pending: [(line: String, group: String, trusted: Bool)] = []
+        var closing: [String] = []
+        var extras = Extras()
 
         // Cosmetics: selectors by the sites they apply to.
         var generic: [String: String] = [:]            // selector -> group
@@ -87,7 +145,7 @@ enum FilterCompiler {
 
         init(modernTypes: Bool) { self.modernTypes = modernTypes }
 
-        mutating func read(_ text: String, group: String) {
+        mutating func read(_ text: String, group: String, trusted: Bool = false) {
             var skipping: [Bool] = []
             for raw in text.split(omittingEmptySubsequences: true, whereSeparator: { $0 == "\n" || $0 == "\r" }) {
                 let line = raw.trimmingCharacters(in: .whitespaces)
@@ -102,7 +160,7 @@ enum FilterCompiler {
                 // Hosts files: "0.0.0.0 host".
                 if line.hasPrefix("0.0.0.0 ") || line.hasPrefix("127.0.0.1 ") {
                     let host = line.split(separator: " ", omittingEmptySubsequences: true).dropFirst().first.map(String.init) ?? ""
-                    if !host.isEmpty, host != "localhost", host != "0.0.0.0" { pending.append(("||\(host)^", group)) }
+                    if !host.isEmpty, host != "localhost", host != "0.0.0.0" { pending.append(("||\(host)^", group, trusted)) }
                     continue
                 }
                 if line.hasPrefix("#") && !line.hasPrefix("##") && !line.hasPrefix("#@#") && !line.hasPrefix("#?#") { continue }
@@ -110,17 +168,17 @@ enum FilterCompiler {
                     badfilters.insert(line.replacingOccurrences(of: ",badfilter", with: "").replacingOccurrences(of: "$badfilter", with: ""))
                     continue
                 }
-                pending.append((line, group))
+                pending.append((line, group, trusted))
             }
         }
 
         mutating func finish() -> Output {
-            for (line, group) in pending where !badfilters.contains(line) {
+            for (line, group, trusted) in pending where !badfilters.contains(line) {
                 // Foundation's string calls leave bridged temporaries to the
                 // autorelease pool; drained only at the end, 170,000 lines of
                 // them took this from 38 MB to 729 MB.
                 autoreleasepool {
-                    if !cosmetic(line, group: group) { network(line, group: group) }
+                    if !cosmetic(line, group: group) { network(line, group: group, trusted: trusted) }
                 }
             }
             return emit()
@@ -142,7 +200,12 @@ enum FilterCompiler {
                     scriptlet(sites: sites, body: body, exception: exception)
                     return true
                 }
-                if marker.contains("?") && Selector.procedural(body) { return true }
+                // Procedural (:has-text, :upward, :remove…), for SearchX's own
+                // script to carry out on the sites named.
+                if Selector.procedural(body) {
+                    procedural(sites: sites, body: body, exception: exception)
+                    return true
+                }
                 guard Selector.plausible(body) else { return true }
                 let parsed = Sites.split(sites)
                 // "site>>" is the site and the frames inside it; for hiding,
@@ -164,6 +227,19 @@ enum FilterCompiler {
                 return true
             }
             return false
+        }
+
+        mutating func procedural(sites: String, body: String, exception: Bool) {
+            guard !body.hasPrefix("^"), body.count < 2000 else { return }
+            let parsed = Sites.split(sites)
+            let positive = parsed.positive.union(parsed.ancestors)
+            // uBO runs none of these everywhere: each is for the sites it names.
+            guard !positive.isEmpty else { return }
+            for site in positive {
+                if exception { extras.proceduralOff[site, default: []].append(body) }
+                else { extras.procedural[site, default: []].append(body) }
+            }
+            if !exception { counts["procedural", default: 0] += 1 }
         }
 
         mutating func scriptlet(sites: String, body: String, exception: Bool) {
@@ -207,28 +283,54 @@ enum FilterCompiler {
 
         // MARK: network
 
-        mutating func network(_ raw: String, group: String) {
+        /// Where a filter's options start: the last "$" that begins one —
+        /// a value can carry a "$" of its own (removeparam=/^x$/).
+        static func optionStart(_ line: String) -> String.Index? {
+            var index = line.endIndex
+            while let dollar = line[..<index].lastIndex(of: "$") {
+                let rest = line[line.index(after: dollar)...]
+                let first = rest.split(separator: ",", maxSplits: 1).first.map(String.init) ?? ""
+                let key = (first.hasPrefix("~") ? String(first.dropFirst()) : first)
+                    .split(separator: "=", maxSplits: 1).first.map(String.init)?.lowercased() ?? ""
+                if Parser.known.contains(key) || Types.map[key] != nil { return dollar }
+                index = dollar
+            }
+            return nil
+        }
+
+        static let known: Set<String> = [
+            "third-party", "3p", "first-party", "1p", "important", "match-case", "domain", "from", "popup", "popunder",
+            "all", "generichide", "ghide", "elemhide", "ehide", "specifichide", "shide", "redirect", "redirect-rule",
+            "document", "doc", "removeparam", "csp", "header", "replace", "badfilter", "to", "denyallow", "method",
+            "permissions", "empty", "mp4", "strict1p", "strict3p", "cname", "ipaddress", "urlskip", "uritransform",
+        ]
+
+        /// Options split on their commas, not on a comma escaped in a value.
+        static func options(_ text: Substring) -> [String] {
+            var out: [String] = [], current = "", escaped = false
+            for character in text {
+                if escaped { current.append(character); escaped = false; continue }
+                if character == "\\" { escaped = true; current.append(character); continue }
+                if character == "," { out.append(current); current = ""; continue }
+                current.append(character)
+            }
+            out.append(current)
+            return out.map { $0.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "\\,", with: ",") }.filter { !$0.isEmpty }
+        }
+
+        mutating func network(_ raw: String, group: String, trusted: Bool = false) {
             var line = raw
             let exception = line.hasPrefix("@@")
             if exception { line.removeFirst(2) }
             var pattern = line
             var optionText: Substring?
-            // Options follow the last "$". A regular expression, /…/, is
-            // followed by them directly ("/…/$script"); its own "$" and any
-            // "/" in an option's value are not where they start.
-            if line.hasPrefix("/") {
-                if let end = line.range(of: "/$", options: .backwards), end.lowerBound > line.startIndex {
-                    pattern = String(line[..<line.index(after: end.lowerBound)])
-                    optionText = line[end.upperBound...]
-                } else if !line.hasSuffix("/"), let dollar = line.lastIndex(of: "$") {
-                    pattern = String(line[..<dollar])
-                    optionText = line[line.index(after: dollar)...]
-                }
-            } else if let dollar = line.lastIndex(of: "$") {
+            // Options follow the last "$" that starts one. A regular
+            // expression, /…/, is followed by them directly ("/…/$script").
+            if let dollar = Parser.optionStart(line), !(line.hasPrefix("/") && line[..<dollar].count < 2) {
                 pattern = String(line[..<dollar])
                 optionText = line[line.index(after: dollar)...]
             }
-            let options = (optionText ?? "").split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+            let options = Parser.options(optionText ?? "")
             var trigger: [String: Any] = [:]
             var types = Set<String>()
             var negatedTypes = Set<String>()
@@ -237,9 +339,12 @@ enum FilterCompiler {
             var unlessDomain: [String] = []
             var popup = false
             var cosmeticOff = false
+            // One of the options SearchX carries out itself, and its value.
+            var special: (kind: String, value: String)?
             for option in options {
                 let (negated, name) = option.hasPrefix("~") ? (true, String(option.dropFirst())) : (false, option)
                 let key = name.split(separator: "=", maxSplits: 1).first.map(String.init)?.lowercased() ?? ""
+                let value = name.split(separator: "=", maxSplits: 1).dropFirst().first.map(String.init) ?? ""
                 switch key {
                 case "third-party", "3p": trigger["load-type"] = [negated ? "first-party" : "third-party"]
                 case "first-party", "1p": trigger["load-type"] = [negated ? "third-party" : "first-party"]
@@ -261,7 +366,13 @@ enum FilterCompiler {
                 case "generichide", "ghide", "elemhide", "ehide", "specifichide", "shide":
                     cosmeticOff = true
                 case "redirect", "redirect-rule":
-                    if key == "redirect-rule" { return }
+                    special = (key, value)
+                case "removeparam", "csp", "header":
+                    special = (key, value)
+                case "replace":
+                    // uBO takes these only from its own lists and yours.
+                    guard trusted else { return }
+                    special = (key, value)
                 case "document", "doc":
                     if negated { continue }
                     types.insert(modernTypes ? "top-document" : "document")
@@ -279,6 +390,31 @@ enum FilterCompiler {
             if cosmeticOff {
                 if exception, let host = Pattern.host(of: pattern) { noGeneric.insert(host) }
                 return
+            }
+            if let special {
+                let body = pattern.trimmingCharacters(in: CharacterSet(charactersIn: "*"))
+                let rule = NetRule(pattern: body.isEmpty ? nil : Pattern.urlFilter(pattern),
+                                   ifDomain: ifDomain, unlessDomain: unlessDomain,
+                                   value: special.value, exception: exception)
+                // A pattern this couldn't read is no filter at all.
+                if !body.isEmpty && rule.pattern == nil { return }
+                switch special.kind {
+                case "removeparam": extras.removeparam.append(rule)
+                case "csp": extras.csp.append(rule)
+                case "header": extras.header.append(rule)
+                case "replace": extras.replace.append(rule)
+                default:
+                    // A script's stand-in; images and the rest are blocked plainly.
+                    let name = special.value.split(separator: ":").first.map(String.init) ?? ""
+                    if !name.isEmpty || exception {
+                        extras.redirect.append(NetRule(pattern: rule.pattern, ifDomain: ifDomain, unlessDomain: unlessDomain,
+                                                       value: name, exception: exception))
+                    }
+                }
+                counts[special.kind, default: 0] += 1
+                // $redirect blocks, and its stand-in answers for what was
+                // blocked; everything else here is SearchX's work alone.
+                guard special.kind == "redirect", !exception else { return }
             }
             // An option with a "$" or "/" of its own (removeparam=/…/) leaves
             // part of itself behind in the pattern: not a filter to guess at.
@@ -350,7 +486,7 @@ enum FilterCompiler {
                     }
                 }
                 // Blocks, then every exception, then what no exception undoes.
-                let limit = 149_000 - exceptions.count - (importants[group]?.count ?? 0)
+                let limit = 149_000 - exceptions.count - (importants[group]?.count ?? 0) - closing.count
                 if rules.count > limit { rules = Array(rules.prefix(max(0, limit))) }
                 // In parts: WebKit's compiler needs memory in proportion to
                 // the largest list it is given (82,000 rules peaked at about a
@@ -364,12 +500,15 @@ enum FilterCompiler {
                 for (index, part) in parts.enumerated() {
                     var list = part + exceptions
                     if index == parts.count - 1 { list += importants[group] ?? [] }
+                    // Last of all, in every part: your exceptions and allow
+                    // rules, then the hosts nothing may block (Protected).
+                    list += closing
                     let name = parts.count == 1 ? group : group + "-" + String(index + 1)
                     lists[name] = "[" + list.joined(separator: ",") + "]"
                     counts["rules-" + name] = list.count
                 }
             }
-            return Output(lists: lists, scriptlets: table, popupHosts: popupHosts.sorted(), counts: counts)
+            return Output(lists: lists, scriptlets: table, popupHosts: popupHosts.sorted(), counts: counts, extras: extras)
         }
     }
 

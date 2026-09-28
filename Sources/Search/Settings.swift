@@ -730,6 +730,18 @@ struct SettingsPanel: View {
                             Pill("Update now") { Task { await filters.update(force: false) } }
                         }
                     }
+                    Rule()
+                    Line("My filters", "Your own, in uBlock Origin’s syntax — procedural ones too. Never on sign-in, passkey or payment pages") {
+                        Pill("Edit filters") { browser.tuning = false; browser.blockering = .filters }
+                    }
+                    Rule()
+                    Line("My rules", "Block or allow a site’s scripts, frames or third parties, as uBlock Origin’s dynamic filtering does") {
+                        Pill("Edit rules") { browser.tuning = false; browser.blockering = .rules }
+                    }
+                    Rule()
+                    Line("Blocker log", "What was blocked on the page in front, and what it loaded") {
+                        Pill("Open log") { browser.tuning = false; browser.blockering = .log }
+                    }
                 }
                 if let host = browser.hereHost, prefs.shielded, shield.trouble == nil {
                     Rule()

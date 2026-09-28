@@ -119,6 +119,8 @@ private struct SearchCommands: Commands {
                     .shortcut("view.hide", browser.shortcuts)
                 Button("Hidden on This Site…") { browser.reviewing.toggle() }
                     .shortcut("view.hidden", browser.shortcuts)
+                Button("Blocker Log…") { browser.blockering = browser.blockering == nil ? .log : nil }
+                    .shortcut("view.blockerLog", browser.shortcuts)
                 Button("Colour…") { browser.theming.toggle() }
                 Menu("Capture Element") {
                     Button("Copy Image…") { browser.key?.captureElement(to: .clipboard) }
@@ -623,6 +625,10 @@ struct ContentView: View {
         if browser.managing {
             sheet { PasswordsPanel(browser: browser) } close: { browser.managing = false }
         }
+        if browser.blockering != nil {
+            sheet { BlockerPanel(browser: browser, own: OwnFilters.shared) }
+                close: { browser.blockering = nil }
+        }
         if browser.reviewing {
             // No dimming for this one: the whole point is to keep looking at
             // the page while the list offers to put things back on it.
@@ -741,6 +747,7 @@ struct ContentView: View {
             .animation(Motion.settle, value: browser.bookmarking)
             .animation(Motion.settle, value: browser.managing)
             .animation(Motion.settle, value: browser.reviewing)
+            .animation(Motion.settle, value: browser.blockering)
             .animation(Motion.settle, value: browser.theming)
             .onChange(of: window.space.theme != nil) { _, _ in glaze(host) }
             .onChange(of: windowTinted) { _, _ in glaze(host) }
@@ -1135,6 +1142,10 @@ struct ContentView: View {
             }
             if browser.reviewing {
                 browser.reviewing = false
+                return true
+            }
+            if browser.blockering != nil {
+                browser.blockering = nil
                 return true
             }
             if window.finding {

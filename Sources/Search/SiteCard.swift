@@ -223,6 +223,23 @@ struct SiteCard: View {
                 Row(on ? "Turn Off Compatibility Mode" : "Turn On Compatibility Mode") {
                     after { Protections.setCompatible(host, !on, in: browser) }
                 }
+                // Your rules for this site (see OwnFilters): its third-party
+                // scripts and frames, as uBO's dynamic filtering sets them.
+                if let url = tab.address {
+                    let site = SiteCard.site(url).lowercased()
+                    let own = OwnFilters.shared
+                    let scripts = own.rule(source: site, destination: "*", type: "3p-script") == .block
+                    // One name each, and a tick when it's on, as a menu shows a
+                    // setting: the line says what it does, not what it would undo.
+                    Row("Block Third-Party Scripts", checked: scripts) {
+                        after { rule(site, "3p-script", on: !scripts) }
+                    }
+                    let frames = own.rule(source: site, destination: "*", type: "3p-frame") == .block
+                    Row("Block Third-Party Frames", checked: frames) {
+                        after { rule(site, "3p-frame", on: !frames) }
+                    }
+                }
+                Row("Blocker Log…") { after { browser.blockering = .log } }
             }
             Separator()
             Row("Print…", keys: "⌘P") { after { browser.printPage() } }
@@ -361,6 +378,15 @@ struct SiteCard: View {
         DispatchQueue.main.async(execute: act)
     }
 
+    /// Your rule for this site's third-party scripts or frames, set or
+    /// taken away, and the page loaded again under it.
+    private func rule(_ site: String, _ type: String, on: Bool) {
+        Task {
+            await OwnFilters.shared.set(.init(source: site, destination: "*", type: type, action: on ? .block : .none))
+            window.reload()
+        }
+    }
+
     /// One line, as a menu item draws it: its title in the menu's font where
     /// a menu puts its text, a key equivalent at the end, the accent colour
     /// behind it and white letters under the pointer. A line that opens more
@@ -369,14 +395,17 @@ struct SiteCard: View {
         let title: String
         var keys = ""
         var submenu = false
+        /// A setting's line: a tick in the menu's own column when it's on.
+        var checked: Bool?
         let act: () -> Void
 
         @State private var hovering = false
 
-        init(_ title: String, keys: String = "", submenu: Bool = false, act: @escaping () -> Void) {
+        init(_ title: String, keys: String = "", submenu: Bool = false, checked: Bool? = nil, act: @escaping () -> Void) {
             self.title = title
             self.keys = keys
             self.submenu = submenu
+            self.checked = checked
             self.act = act
         }
 
@@ -401,6 +430,15 @@ struct SiteCard: View {
                 }
             }
             .padding(.leading, MenuMetrics.text - MenuMetrics.inset)
+            .overlay(alignment: .leading) {
+                if checked == true {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(hovering ? Color.white : Color(nsColor: .labelColor))
+                        .frame(width: MenuMetrics.text - MenuMetrics.inset)
+                        .accessibilityHidden(true)
+                }
+            }
             .padding(.trailing, MenuMetrics.trailing - MenuMetrics.inset)
             .frame(height: MenuMetrics.row)
             .background(
@@ -411,6 +449,9 @@ struct SiteCard: View {
             .contentShape(Rectangle())
             .onTapGesture(perform: act)
             .onHover { hovering = $0 }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityValue(checked.map { $0 ? "On" : "Off" } ?? "")
         }
     }
 

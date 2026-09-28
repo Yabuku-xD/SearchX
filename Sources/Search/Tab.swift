@@ -235,6 +235,14 @@ final class Tab: ObservableObject, Identifiable {
     /// host, filled in as each is navigated to (see the navigation policy).
     private var scriptletHosts: [String: [[String]]] = [:]
     private var scriptletTop: String?
+    /// What the blocker did here (see BlockLog).
+    let blockLog = BlockLog()
+    /// What SearchX's own filters do in the page and its frames, by host (see
+    /// PageFilters), and the policies the page itself is given.
+    private var pageWork: [String: PageFilters.Work] = [:]
+    private var pagePolicies: [String] = []
+    private var pageShared = false
+    private var workTop: URL?
 
     @Published private(set) var title = ""
     @Published private(set) var address: URL?
@@ -747,6 +755,31 @@ final class Tab: ObservableObject, Identifiable {
                 WKUserScript(source: scriptlets, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page)
             )
         }
+        // SearchX's own filters (see PageFilters): procedural ones and
+        // redirect stand-ins in its own world, the page's policies before
+        // its head, and response rewriting in the page's world — each only
+        // where a rule asks.
+        if let procedural = PageFilters.proceduralSource(byHost: pageWork.mapValues(\.procedural)) {
+            controller.addUserScript(
+                WKUserScript(source: procedural, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
+            )
+        }
+        if let policies = PageFilters.cspSource(pagePolicies) {
+            controller.addUserScript(
+                WKUserScript(source: policies, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Web.world)
+            )
+        }
+        if let redirects = PageFilters.redirectSource(byHost: pageWork.mapValues(\.redirect),
+                                                      shared: pageShared ? Shield.shared.sharedRedirects : []) {
+            controller.addUserScript(
+                WKUserScript(source: redirects, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
+            )
+        }
+        if let replacing = PageFilters.replaceSource(byHost: pageWork.mapValues(\.replace)) {
+            controller.addUserScript(
+                WKUserScript(source: replacing, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page)
+            )
+        }
         guard !css.isEmpty else { return }
         controller.addUserScript(
             WKUserScript(source: Veiling.style(css), injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Web.world)
@@ -764,15 +797,29 @@ final class Tab: ObservableObject, Identifiable {
         let host = url.host()?.lowercased() ?? ""
         scriptletTop = host
         scriptletHosts = host.isEmpty ? [:] : [host: Shield.shared.scriptlets(for: host, top: host)]
+        workTop = url
+        let work = Shield.shared.work(for: url, top: nil)
+        pageWork = host.isEmpty || work.isEmpty ? [:] : [host: work]
+        pagePolicies = work.csp
+        pageShared = work.shared
     }
 
     /// A frame on the page is about to load: its scriptlets join the page's,
     /// and the page's scripts are armed again when that adds any.
     func scriptlets(forFrame url: URL) {
-        guard let host = url.host()?.lowercased(), !host.isEmpty, scriptletHosts[host] == nil else { return }
+        guard let host = url.host()?.lowercased(), !host.isEmpty else { return }
+        var changed = false
+        if pageWork[host] == nil {
+            let work = Shield.shared.work(for: url, top: workTop)
+            if !work.isEmpty { pageWork[host] = work; changed = true }
+        }
+        guard scriptletHosts[host] == nil else {
+            if changed { arm(hiding: veils) }
+            return
+        }
         let calls = Shield.shared.scriptlets(for: host, top: scriptletTop)
         scriptletHosts[host] = calls
-        if !calls.isEmpty { arm(hiding: veils) }
+        if !calls.isEmpty || changed { arm(hiding: veils) }
     }
 
     /// The pointing mode, handed to the page only when it is asked for:
