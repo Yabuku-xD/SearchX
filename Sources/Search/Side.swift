@@ -749,24 +749,47 @@ private struct PinSquare: View {
 }
 
 /// One tab, as a line in the column.
-private struct SideRow: View {
+private struct SideRow: View, Equatable {
     @Environment(\.columnSettled) private var settled
-    @ObservedObject var window: WindowModel
+    /// For what the row does. Not watched: every row watching the window
+    /// had all of them worked out again whenever anything in it changed —
+    /// a tab switch redrew a hundred and fifty rows to move one highlight.
+    /// What the row shows of the window is handed in below instead, and the
+    /// row is only drawn again when that, or its own tab, changes.
+    let window: WindowModel
     @ObservedObject var prefs: Preferences
     @ObservedObject var tab: Tab
     let live: Bool
     let pill: Namespace.ID
     let close: () -> Void
+    /// One of a chosen set of tabs, lit wherever the pointer is.
+    let selected: Bool
+    let editing: Bool
+    /// Refused edits, for the shake — only counted while this row is edited.
+    let refusals: Int
+
+    init(window: WindowModel, prefs: Preferences, tab: Tab, live: Bool, pill: Namespace.ID, close: @escaping () -> Void) {
+        self.window = window
+        _prefs = ObservedObject(wrappedValue: prefs)
+        _tab = ObservedObject(wrappedValue: tab)
+        self.live = live
+        self.pill = pill
+        self.close = close
+        selected = window.selectedTabs.contains(tab.id)
+        editing = window.editingTab == tab.id
+        refusals = window.editingTab == tab.id ? window.refusals : 0
+    }
+
+    static func == (a: SideRow, b: SideRow) -> Bool {
+        a.tab === b.tab && a.live == b.live && a.selected == b.selected
+            && a.editing == b.editing && a.refusals == b.refusals && a.pill == b.pill
+    }
 
     @State private var hovering = false
     @State private var shake: CGFloat = 0
-    /// One of a chosen set of tabs, lit wherever the pointer is.
-    private var selected: Bool { window.selectedTabs.contains(tab.id) }
     /// A plain click, with no modifier held: command and shift are
     /// selection gestures, and the row answers them as such.
     private var plain: Bool { (NSApp.currentEvent?.modifierFlags ?? []).intersection([.command, .shift]).isEmpty }
-
-    private var editing: Bool { window.editingTab == tab.id }
 
     /// The ring or the speaker, which stay for as long as the page loads or
     /// plays (or is muted) and so keep a place of their own at the end of the
@@ -875,7 +898,7 @@ private struct SideRow: View {
         .contextMenu { TabMenu(window: window, tab: tab, close: close) }
         .animation(Motion.quick, value: hovering)
         .animation(Motion.glide, value: editing)
-        .onChange(of: window.refusals) { _, _ in
+        .onChange(of: refusals) { _, _ in
             guard editing else { return }
             shake = 0
             withAnimation(Motion.easeOut(0.5)) { shake = 1 }
@@ -1043,10 +1066,11 @@ private enum SideItem: Identifiable {
     func view(window: WindowModel, prefs: Preferences, pill: Namespace.ID) -> some View {
         switch self {
         case .heading(let group):
-            GroupHeading(window: window, group: group, carried: true)
+            GroupHeading(window: window, group: group, carried: true, members: window.tabs(in: group.id))
         case .row(let tab):
             SideRow(window: window, prefs: prefs, tab: tab, live: tab.id == window.activeID,
                     pill: pill, close: { window.close(tab) })
+                .equatable()
                 .modifier(SplitSource(browser: window, tab: tab))
         }
     }

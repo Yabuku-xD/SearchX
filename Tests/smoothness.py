@@ -29,7 +29,7 @@ class P(BaseHTTPRequestHandler):
         self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body)
     def log_message(self,*a): pass
 class Headless:
-    def __init__(self, app=None, prefs=None):
+    def __init__(self, app=None, prefs=None, session=None):
         app = Path(app or ROOT/'.build/debug/Search')
         if app.is_file():
             import tempfile
@@ -50,8 +50,12 @@ class Headless:
         p = Path('/tmp')/(self.world+'.plist'); p.write_bytes(plistlib.dumps(base)); subprocess.run(['defaults','import',self.suite,str(p)],check=True); p.unlink()
         self.profile.mkdir(parents=True)
         wid = str(uuid.uuid4()).upper()
+        # `session`: (tabs, groups) to start with, restored asleep as after a
+        # relaunch — each tab {'url', 'title', 'pin'?, 'groupID'?}.
+        tabs, groups = session or ([], [])
+        tabs = [{**t, 'url': t['url'].replace('{origin}', self.origin)} for t in tabs]
         (self.profile/'session.json').write_text(json.dumps({'layout':[{'id':wid,'space':'00000000-0000-0000-0000-000000000001'}],
-            'windows':[{'id':wid,'active':0,'tabs':[],'frameBox':{'x':0,'y':0,'width':1300,'height':860}}]}))
+            'windows':[{'id':wid,'active':0,'tabs':tabs,'groups':groups,'frameBox':{'x':0,'y':0,'width':1300,'height':860}}]}))
         subprocess.run(['open','-g','-n','-a',str(self.app),'--env','SEARCH_PROBE='+self.world,'--env','SEARCH_PARK=1'],check=True)
         end = time.time()+30
         while time.time() < end:

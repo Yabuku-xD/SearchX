@@ -29,6 +29,11 @@ struct GroupHeading: View {
     /// the heading and folds its tabs under it. The strip across the top
     /// still hands the group over by the system's drag.
     var carried = false
+    /// The group's tabs, worked out once by whoever lays the heading out.
+    /// Asked for here instead, each look at them read every tab in the
+    /// window — six looks a heading, every heading, every redraw.
+    var members: [Tab]? = nil
+    private var inGroup: [Tab] { members ?? window.tabs(in: group.id) }
 
     @State private var draft = ""
     @State private var hovering = false
@@ -108,19 +113,19 @@ struct GroupHeading: View {
                 window.toggleTabGroup(group.id)
             }
             Divider()
-            let count = window.tabs(in: group.id).count
+            let count = inGroup.count
             if window.profile.prefs.splitViews {
                 Button("Show Group in Split View") { window.tileGroup(group.id) }
                     .disabled(count < 2)
             }
             Button("Put Group to Sleep") { window.sleepGroup(group.id) }
-                .disabled(!window.tabs(in: group.id).contains { !$0.isBlank && !$0.asleep })
+                .disabled(!inGroup.contains { !$0.isBlank && !$0.asleep })
             Button("Bookmark Group") { window.bookmarkGroup(group.id) }
-                .disabled(!window.tabs(in: group.id).contains(where: \.showsPage))
+                .disabled(!inGroup.contains(where: \.showsPage))
             Button("Pin Group") { window.pinGroup(group.id) }
-                .disabled(!window.tabs(in: group.id).contains(where: \.showsPage))
+                .disabled(!inGroup.contains(where: \.showsPage))
             Button("Save and Close Group") { window.saveAndCloseGroup(group.id) }
-                .disabled(!window.tabs(in: group.id).contains(where: \.showsPage))
+                .disabled(!inGroup.contains(where: \.showsPage))
             Divider()
             Button("Remove Group") { window.removeTabGroup(group.id) }
         }
@@ -165,7 +170,7 @@ struct GroupHeading: View {
                 .font(.system(size: 13))
                 .frame(width: 15, height: 15)
                 .accessibilityHidden(true)
-        } else if let tab = window.tabs(in: group.id).first {
+        } else if let tab = inGroup.first {
             GroupMark(tab: tab)
         } else {
             Image(systemName: "square.stack")

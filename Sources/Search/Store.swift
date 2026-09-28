@@ -14,10 +14,13 @@ enum Store {
     /// is not belt and braces: a development build launched from a terminal
     /// once wrote over somebody's real session, and asking a person to
     /// remember a flag is not a safeguard.
-    static var testing: Bool {
+    /// Worked out once: the environment a process started with doesn't
+    /// change, and reading it builds the whole table again each time — this
+    /// is asked fifty places over, some of them once per tab.
+    static let testing: Bool = {
         if ProcessInfo.processInfo.environment["SEARCH_PROBE"] != nil { return true }
         return Bundle.main.executablePath?.contains("/.build/") == true
-    }
+    }()
 
     /// Which test world a test run lives in. SEARCH_PROBE=1, or a run from
     /// the build folder, is the test world, "Search (test)". SEARCH_PROBE=

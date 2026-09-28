@@ -7,8 +7,17 @@ import AppKit
 /// search engine.
 struct Omnibox: View {
     @ObservedObject var window: WindowModel
+    /// What typing changes: the text, the list, the grey ending, the row
+    /// walked to (see FieldSignal).
+    @ObservedObject private var typing: FieldSignal
     /// Raised over a page by ⌘L, rather than standing on an empty tab.
     let over: Bool
+
+    init(window: WindowModel, over: Bool) {
+        self.window = window
+        self.over = over
+        _typing = ObservedObject(wrappedValue: window.field)
+    }
 
     /// The field's own height — the 22 of text and 14 of air above and below it
     /// that `field` lays out — so the list can sit below it without being
@@ -62,7 +71,7 @@ struct Omnibox: View {
     }
 
     private var field: some View {
-        AddressField(window: window, summoning: window.summoning)
+        AddressField(window: window, field: window.field, summoning: window.summoning)
             .frame(height: 22)
             .padding(.horizontal, 22)
             .padding(.vertical, 14)
@@ -335,6 +344,9 @@ private struct Breath: NSViewRepresentable {
 /// needs a real text field and its delegate.
 struct AddressField: NSViewRepresentable {
     @ObservedObject var window: WindowModel
+    /// What typing changes, so text put in from elsewhere (⌘K, a pick from
+    /// the list) reaches the field.
+    @ObservedObject var field: FieldSignal
     /// ⌘K or not, handed in so a change to it is a change SwiftUI sees
     /// here, and the placeholder follows it at once.
     var summoning = false

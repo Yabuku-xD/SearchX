@@ -84,13 +84,20 @@ final class WindowModel: ObservableObject, Identifiable {
     /// What is in the field. Every change re-reads the history, because the
     /// list under the field and the grey ending inside it are both just
     /// answers to this string.
-    @Published var typed = "" { didSet { guess() } }
+    ///
+    /// These four change on every keystroke, and tell only the field and its
+    /// list (see FieldSignal): published on the window, each one had every
+    /// row and heading in the sidebar worked out again, 100 ms a keystroke
+    /// with 150 tabs in it.
+    var typed = "" { willSet { field.objectWillChange.send() } didSet { guess() } }
     /// What the field is offering, best first.
-    @Published private(set) var offers: [Suggestion] = []
+    private(set) var offers: [Suggestion] = [] { willSet { field.objectWillChange.send() } }
     /// The rest of the best match, drawn grey after the caret. Tab takes it.
-    @Published private(set) var ending: String?
+    private(set) var ending: String? { willSet { field.objectWillChange.send() } }
     /// Which row the arrow keys have walked to, if any.
-    @Published var picked: Int?
+    var picked: Int? { willSet { field.objectWillChange.send() } }
+    /// Who is told when the four above change: the address field and its list.
+    let field = FieldSignal()
     /// Bumped when what was typed isn't an address and can't be searched for.
     @Published private(set) var refusals = 0
     /// Bumped whenever the cursor should go back into the field.
@@ -1813,3 +1820,8 @@ final class WindowModel: ObservableObject, Identifiable {
             .store(in: &tab.windowBag)
     }
 }
+
+/// What typing in the address field changes, told to the field and its list
+/// alone (see WindowModel.typed).
+@MainActor
+final class FieldSignal: ObservableObject {}
