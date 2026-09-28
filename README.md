@@ -21,10 +21,10 @@ and private because it has nowhere to send your data.
 
 <table>
 <tr>
-<td align="center" width="25%"><h2>11.6 MB</h2>on disk, universal</td>
-<td align="center" width="25%"><h2>324 ms</h2>to the first window</td>
-<td align="center" width="25%"><h2>74 MB</h2>before the first page</td>
-<td align="center" width="25%"><h2>11</h2>processes with five tabs</td>
+<td align="center" valign="top" width="25%"><img width="200" height="0" alt=""><br><h2>12.6 MB</h2>on disk,<br>universal<br><br></td>
+<td align="center" valign="top" width="25%"><img width="200" height="0" alt=""><br><h2>324 ms</h2>to the<br>first window<br><br></td>
+<td align="center" valign="top" width="25%"><img width="200" height="0" alt=""><br><h2>74 MB</h2>before the<br>first page<br><br></td>
+<td align="center" valign="top" width="25%"><img width="200" height="0" alt=""><br><h2>11</h2>processes with<br>five tabs<br><br></td>
 </tr>
 </table>
 
@@ -53,13 +53,13 @@ Pick any picture and SearchX redraws it as pixel art in the picture's own colour
 <td valign="top">
 
 ### ⚡ Motion that keeps up
-Pages run at 120 Hz on ProMotion displays when you allow it. A mouse wheel glides instead of stepping, while trackpads and mouse tools that already smooth, like LinearMouse or Mos, are left exactly as you set them. Scroll bars stay hidden until you scroll. The sidebar folds away and slides back from the edge, with adjustable delay and speed.
+Pages run at 120 Hz on ProMotion displays when you allow it. A mouse wheel glides like Chrome's, one eased curve per notch, while trackpads and mouse tools that already smooth, like LinearMouse or Mos, are left exactly as you set them. Scroll bars stay hidden until you scroll. The sidebar folds away and slides back from the edge, with adjustable delay and speed, and stays quick with 150 tabs: typing, switching tabs and sliding it out redraw only the rows that change.
 
 </td>
 <td valign="top">
 
 ### 🗂 Tabs, your way
-Across the top or down either side. Pinned tabs, groups with an emoji or their first site as an icon, which you can split, sleep, bookmark, pin, or save and close for later, split view of up to four pages side by side, stacked or in a grid, Spaces, several windows and private windows. Shift-click a link to peek at it, then keep it as a tab or beside this one. Containers keep work and personal sign-ins apart in the same Space, each with its own cookies and site data. Sessions come back exactly as you left them.
+Across the top or down either side. Pinned tabs, which can sleep too, and groups with an emoji or their first site as an icon, their tabs indented on a line that runs from the icon to the last tab, so you always see which tabs belong where. Drag tabs and groups to reorder them; split, sleep, bookmark or pin a whole group, or save and close it for later. Split view shows up to four pages side by side, stacked or in a grid. Spaces, several windows and private windows. Shift-click a link to peek at it, then keep it as a tab or beside this one. Containers keep work and personal sign-ins apart in the same Space, each with its own cookies and site data. Sessions come back exactly as you left them.
 
 </td>
 </tr>
@@ -67,7 +67,7 @@ Across the top or down either side. Pinned tabs, groups with an emoji or their f
 <td valign="top">
 
 ### 🔑 Passwords in your keychain
-SearchX offers to save a sign-in only after it has worked, and never fills anything on its own. Passkeys use the Mac's own sheet. Bring your passwords over from Chrome, Arc, Dia, Brave or Edge in one click.
+SearchX offers to save a sign-in only after it has worked, and never fills anything on its own. Passkeys use the Mac's own sheet, or your password manager's when it keeps them, like Dashlane. Continue with Google, Sign in with Apple and the like open in a small window over the page and are never blocked. Bring your passwords over from Chrome, Arc, Dia, Brave or Edge in one click.
 
 </td>
 <td valign="top">
@@ -202,6 +202,8 @@ SwiftUI draws the interface, AppKit handles the window chrome, and WKWebView sho
 | `Shield.swift`, `Filters.swift` | Blocking |
 | `OwnFilters.swift`, `PageFilters.swift`, `RuleMatch.swift`, `BlockLog.swift` | Your filters and rules, what SearchX does beyond WebKit's blocker, the log |
 | `Protected.swift` | The sign-in, passkey, captcha and payment pages nothing new touches |
+| `Protections.swift` | Fingerprinting protection and Compatibility Mode |
+| `Passkeys.swift`, `Little.swift` | Passkeys, and the small windows sign-in pop-ups open in |
 | `FilterCompiler.swift`, `FilterWorker.swift` | Compiling filter lists in a short-lived helper process |
 | `Scriptlets.swift`, `Intent.swift` | Scriptlets and behaviour-based pop-up blocking |
 | `Wallpaper.swift`, `PixelArt.swift`, `Beam.swift` | The new tab picture and the address field light |
@@ -239,9 +241,13 @@ Each end-to-end check runs its own temporary app and profile, and saves screensh
 | Command | What it checks |
 |---|---|
 | `python3 Tests/local-resolution.py core` | Windows, tabs, sessions and the address field |
-| `python3 Tests/audit-features.py` | Quick Commands, chains, focus, saving power, web panels, split views, groups, saved groups and containers |
-| `python3 Tests/wheel-glide.py` | Mouse wheel steps glide; trackpads and smoothing mouse tools pass through untouched |
-| `python3 Tests/weigh.py` | The size, launch time, memory and process count at the top of this page |
+| `python3 Tests/audit-features.py` | ⌘K, chains, focus, power, panels, splits, groups, containers |
+| `python3 Tests/wheel-glide.py` | Wheel glide; trackpads and mouse tools left alone |
+| `python3 Tests/blocker.py` | Your filters and rules, the log, protected pages |
+| `python3 Tests/popup-live.py` | Pop-ups on live sites, blocker on, lists off and off |
+| `python3 Tests/smoothness.py` | Scrolling, sidebar slides and tab switches, frame by frame |
+| `python3 Tests/sidebar-scale.py` | The same with 150 tabs, plus typing and resizing |
+| `python3 Tests/weigh.py` | The numbers at the top of this page |
 
 </details>
 

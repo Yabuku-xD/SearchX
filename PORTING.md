@@ -10,7 +10,7 @@ grew from.
 
 ## What carries over, and what doesn't
 
-About 43,500 lines of Swift. 57 files import SwiftUI and 43 import AppKit:
+About 46,700 lines of Swift. 59 files import SwiftUI and 44 import AppKit:
 everything drawn has to be drawn again. What does not have to be written
 again:
 
@@ -32,7 +32,7 @@ Not coming over, and worth saying up front:
 
 | | Why |
 |---|---|
-| Chrome extensions (about 6,000 lines) | `WKWebExtension` exists only on Apple's platforms |
+| Chrome extensions (about 7,600 lines) | `WKWebExtension` exists only on Apple's platforms |
 | Passkeys | No platform authenticator on Linux; no WebAuthn in WebKit's Windows port |
 | Share sheet, 120 Hz pages, traffic lights | Mac-only to begin with |
 | DRM video (Netflix and the like) | No Widevine in WebKitGTK or the Windows port |
