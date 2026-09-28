@@ -27,6 +27,12 @@ enum NativeProbe {
                 return ["started": true]
             }
             return Hitches.shared.stop()
+        case "block":
+            // The main thread kept busy for MS: what goes on moving meanwhile
+            // doesn't depend on it.
+            let until = CACurrentMediaTime() + (request["ms"] as? Double ?? 100) / 1000
+            while CACurrentMediaTime() < until {}
+            return ["blocked": true]
         case "live":
             // Pages still alive anywhere: a tab closed for good lets its go.
             let pages = Web.pages.allObjects
