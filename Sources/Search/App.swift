@@ -756,6 +756,8 @@ struct ContentView: View {
             .animation(browser.theming ? Motion.settle : Motion.quick, value: browser.theming)
             .onChange(of: window.space.theme != nil) { _, _ in glaze(host) }
             .onChange(of: windowTinted) { _, _ in glaze(host) }
+            // Every step of the slider, while it moves.
+            .onChange(of: browser.prefs.chromeBlur) { _, _ in glaze(host) }
         .onAppear {
             watchKeys()
             window.askFocus()
@@ -1000,6 +1002,16 @@ struct ContentView: View {
         let clear = window.space.theme != nil || windowTinted
         host.isOpaque = !clear
         host.backgroundColor = clear ? .clear : Palette.NS.ground
+        // The desktop behind the chrome, blurred as much as the page under
+        // the column brought out over it (see pageOverlay): one strength for
+        // both. A space's colour frosts the desktop its own way.
+        let radius = windowTinted ? Int((browser.prefs.chromeBlur * 30).rounded()) : 0
+        if !WindowBlur.set(host, radius: radius), host.windowNumber <= 0 {
+            // Not on the window server yet: once it is.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak host] in
+                if let host { WindowBlur.set(host, radius: radius) }
+            }
+        }
     }
 
     // MARK: - keys

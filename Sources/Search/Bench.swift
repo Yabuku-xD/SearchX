@@ -515,8 +515,11 @@ final class Bench {
                     "level": window.level.rawValue,
                     "frame": [Int(window.frame.minX), Int(window.frame.minY), Int(window.frame.width), Int(window.frame.height)],
                     "number": window.windowNumber,
+                    // What is behind the window, blurred by it (see WindowBlur); -1 never set.
+                    "backgroundBlur": WindowBlur.applied[window.windowNumber] ?? -1,
                 ]
             }
+            out["windowBlurAvailable"] = WindowBlur.available
             // Each window's own row, so a multi-window bug can be seen from
             // the shell: which model the scene is drawing, and what each holds.
             out["rows"] = browser.windows.map { model -> [String: Any] in

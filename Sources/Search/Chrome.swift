@@ -117,7 +117,12 @@ struct ChromeBackground: View {
             Color.clear.allowsHitTesting(false)
         case .desktop:
             ZStack {
-                Frost(material: .sidebar)
+                // The desktop is blurred by the window itself, as much as
+                // Settings says (see WindowBlur): the same tint over the same
+                // blur as the column brought out over the page. Only where
+                // the Mac can't blur a window that way does the system's own
+                // sidebar material stand in, at its own fixed strength.
+                if !WindowBlur.available { Frost(material: .sidebar) }
                 Palette.ground.opacity(1 - prefs.chromeTransparency)
             }
             .allowsHitTesting(false)
@@ -125,6 +130,48 @@ struct ChromeBackground: View {
             Palette.ground.opacity(reduceTransparency ? 1 : 1 - prefs.chromeTransparency)
                 .allowsHitTesting(false)
         }
+    }
+}
+
+/// A see-through window blurring whatever is behind it — the desktop, beside
+/// the page — by a radius of its own, as Ghostty and iTerm do for their blur
+/// settings. The system's materials blur by a fixed amount; this is what lets
+/// Blur strength soften the desktop behind the docked column exactly as it
+/// softens the page under the column brought out over it. The call is
+/// private to macOS, so it is looked up rather than linked: where it's
+/// missing, `available` is false and the system material stands in.
+@MainActor
+enum WindowBlur {
+    private typealias Connection = @convention(c) () -> Int32
+    private typealias Setter = @convention(c) (Int32, Int32, Int32) -> Int32
+
+    /// The first of `names` the process can see: SkyLight's name, then the
+    /// older CoreGraphics one it still answers to.
+    private static func symbol(_ names: [String]) -> UnsafeMutableRawPointer? {
+        let handle = dlopen(nil, RTLD_NOW)
+        for name in names { if let found = dlsym(handle, name) { return found } }
+        return nil
+    }
+
+    private static let connection: Connection? = symbol(["SLSMainConnectionID", "CGSMainConnectionID"])
+        .map { unsafeBitCast($0, to: Connection.self) }
+    private static let setter: Setter? = symbol(["SLSSetWindowBackgroundBlurRadius", "CGSSetWindowBackgroundBlurRadius"])
+        .map { unsafeBitCast($0, to: Setter.self) }
+
+    static var available: Bool { connection != nil && setter != nil }
+
+    /// What each window was last given, by window number (for the bench).
+    private(set) static var applied: [Int: Int] = [:]
+
+    /// Blurs what is behind `window` by `radius` points; 0 takes it away.
+    /// False when the window has no number yet or the call isn't there.
+    @discardableResult
+    static func set(_ window: NSWindow, radius: Int) -> Bool {
+        guard let connection, let setter, window.windowNumber > 0 else { return false }
+        guard applied[window.windowNumber] != radius else { return true }
+        guard setter(connection(), Int32(window.windowNumber), Int32(max(0, radius))) == 0 else { return false }
+        applied[window.windowNumber] = radius
+        return true
     }
 }
 

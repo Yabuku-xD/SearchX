@@ -424,12 +424,12 @@ struct SettingsPanel: View {
             }
 
             Rule()
-            Line("Transparency", "See the desktop through the bars, and the page through a sidebar that slides out.") {
+            Line("Transparency", "See through the bars and the sidebar: to the desktop beside the page, or to the page under a sidebar that slides out.") {
                 chromeSlider("Transparency", value: $prefs.chromeTransparency)
                     .disabled(reduceTransparency)
             }
             Rule()
-            Line("Blur strength", "Soften the page showing through a sidebar that slides out.") {
+            Line("Blur strength", "Soften whatever shows through them, the same amount docked or slid out.") {
                 chromeSlider("Blur strength", value: $prefs.chromeBlur)
                     .disabled(reduceTransparency || prefs.chromeTransparency == 0)
             }

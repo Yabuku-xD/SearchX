@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Increasing blur must preserve solid page colors at fixed transparency."""
+"""Increasing blur must preserve solid page colors at fixed transparency.
+
+Also: the desktop behind the docked chrome is blurred by the same strength as
+the page under the chrome brought out over it (see WindowBlur), and follows
+the slider at every step, while Settings is still open.
+"""
 import argparse
 import json
 from pathlib import Path
@@ -41,11 +46,25 @@ def blur(value):
             break
         run.ask('native', action='increment' if current < value else 'decrement', index=node['index'])
         time.sleep(.1)
+        docked_blur(float(control('Blur strength')['value']))
     else:
         raise AssertionError('blur did not update')
     run.check(abs(float(control('Transparency')['value']) - .8) < .001, 'transparency stays at 80%')
     run.ask('ui', settings=False)
     time.sleep(.5)
+
+
+def docked_blur(strength):
+    """The window's own blur of the desktop, at this step of the slider."""
+    probe = run.ask('probe')
+    if not probe.get('windowBlurAvailable'):
+        return
+    host = next(r['host'] for r in probe['rows'] if r['key'])
+    applied = next(w['backgroundBlur'] for w in probe['windows'] if w['number'] == host)
+    want = int(strength * 30 + 0.5)  # Swift rounds halves up
+    run.report.setdefault('dockedBlur', []).append({'strength': strength, 'applied': applied})
+    if applied != want:
+        raise AssertionError(f'desktop blur {applied} at {strength:.2f}, want {want}')
 
 
 def capture(name, rects):
@@ -95,6 +114,8 @@ try:
                     for a, b in zip(original, current))
         results[str(sidebar)] = {'colors': colors, 'maximumChannelDrift': drift}
     run.report['samples'] = results
+    steps = run.report.get('dockedBlur', [])
+    run.check(len(steps) >= 3, f'the desktop blur followed the slider live, {len(steps)} steps')
     for layout, result in results.items():
         run.check(all(c[2] > c[0] + 50 for c in result['colors'][0]),
                   f'page color is visible through the chrome: sidebar={layout}')
