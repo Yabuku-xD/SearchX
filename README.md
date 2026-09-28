@@ -253,7 +253,7 @@ Each end-to-end check runs its own temporary app and profile, and saves screensh
 | `python3 Tests/local-resolution.py forms-churn`     | Form detection and autofill during a changing document, with scan timings            |
 | `python3 Tests/audit-features.py`                   | ⌘K, chains, focus, power, panels, splits, groups, containers and queued sleep        |
 | `python3 Tests/wheel-glide.py`                      | Wheel glide, nested player menus and cancellation; continuous input passes through   |
-| `python3 Tests/blocker.py`                          | Your filters and rules, large procedural results, the log and protected pages        |
+| `python3 Tests/blocker.py`                          | Filters, recycled posts, overlapping matches, persistent helpers and protected pages |
 | `python3 Tests/popup-live.py`                       | Pop-ups on live sites, blocker on, lists off and off                                 |
 | `python3 Tests/smoothness.py`                       | Scrolling, sidebar slides and tab switches, frame by frame                           |
 | `python3 Tests/sidebar-scale.py`                    | The same with 150 tabs, plus typing and resizing                                     |
@@ -263,6 +263,17 @@ Each end-to-end check runs its own temporary app and profile, and saves screensh
 Performance probes report callback cadence separately from the display or configured page target. Their frame timings are scheduling measurements, not a count of frames physically presented by the display. The icon cache benchmark (`python3 Tests/favicon-performance.py`) separates time spent requesting cold icons on the UI thread from the time needed to finish loading them.
 
 For an invisible performance run, the probe refreshes the owned window's visibility state after disabling occlusion detection for the measured page. Confirm `document.hidden` is false and that animation callbacks arrive before using its timings. Video playback quality and GPU memory need separate measurements; a page's animation callback rate does not establish smooth video presentation.
+
+The feed workload installs real filters in a disposable profile, scrolls with native input and keeps a video in view while new posts arrive. It records frame intervals, response and insertion times, video buffers and callbacks, and app/WebContent CPU and memory. Use a local MP4 longer than the run:
+
+```sh
+python3 Tests/performance.py --binary .build/debug/Search --label feed-growing --feed grow --feed-cards 2000 --seconds 90 --video /path/to/video.mp4
+python3 Tests/performance.py --binary .build/debug/Search --label feed-recycled --feed recycle --feed-cards 200 --seconds 90 --video /path/to/video.mp4
+```
+
+Each command prints its artifact directory under `.local-performance/`, containing the fixture, applied filters and JSON results. Use the same video and arguments for both binaries when comparing changes. `--rate default` measures the 60 Hz configuration; the default `--rate fast` targets 120 Hz. These controlled workloads do not establish the cause of delays on an authenticated feed or guarantee physical video presentation.
+
+A visible document flag does not rule out background scheduling in an invisible window. If callback cadence falls during a long run, repeat both binaries with `--test-scheduling`. That diagnostic uses the existing test process activity assertion and inactive-page scheduling override. Keep its results separate from the normal run; it changes only the disposable test process, not the installed browser or system preferences.
 
 </details>
 

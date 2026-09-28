@@ -289,18 +289,22 @@ enum Scriptlets {
     },
     'remove-node-text': function (nodeName, search) { nodeText(nodeName, search, null); },
     'replace-node-text': function (nodeName, pattern, replacement) { nodeText(nodeName, pattern, replacement || ''); },
-    'remove-attr': function (attrs, selector, behavior) { attributes(attrs, selector, behavior, function (el, name) { el.removeAttribute(name); }); },
+    'remove-attr': function (attrs, selector, behavior) { attributes(attrs, selector, behavior, function (el, name) { writeAttribute(el, name, null); }); },
     'remove-class': function (classes, selector, behavior) {
       if (!classes) return;
       var names = classes.split(/\s*\|\s*/);
       var target = selector || names.map(function (c) { return '.' + CSS.escape(c); }).join(',');
-      settle(behavior, function () {
-        D.querySelectorAll(target).forEach(function (el) { names.forEach(function (c) { el.classList.remove(c); }); });
-      });
+      settle(behavior, target, function (el) {
+        names.forEach(function (c) {
+          if (!el.classList.contains(c)) return;
+          var tracked = connected(el); el.classList.remove(c);
+          if (tracked) ownAttribute(el, 'class');
+        });
+      }, ['class']);
     },
     'set-attr': function (selector, attr, raw) {
       if (!selector || !attr) return;
-      settle('stay', function () { D.querySelectorAll(selector).forEach(function (el) { el.setAttribute(attr, raw || ''); }); });
+      settle('stay', selector, function (el) { writeAttribute(el, attr, raw || ''); }, [attr]);
     },
     'set-local-storage-item': function (key, raw) { storage(W.localStorage, key, raw); },
     'set-session-storage-item': function (key, raw) { storage(W.sessionStorage, key, raw); },
@@ -340,19 +344,17 @@ enum Scriptlets {
     },
     'close-window': function (search) { if (needle(search).test(location.pathname + location.search)) W.close(); },
     'prevent-refresh': function () {
-      settle('stay', function () { D.querySelectorAll('meta[http-equiv="refresh" i]').forEach(function (m) { m.remove(); }); });
+      settle('stay', 'meta[http-equiv="refresh" i]', function (m) { m.remove(); });
     },
     'href-sanitizer': function (selector, source) {
       if (!selector) return;
-      settle('stay', function () {
-        D.querySelectorAll(selector).forEach(function (a) {
+      settle('stay', selector, function (a) {
           var next = null;
           if (!source || source === 'text') next = (a.textContent || '').trim();
           else if (source.charAt(0) === '?') { try { next = new URL(a.href).searchParams.get(source.slice(1)); } catch (e) {} }
           else if (source.charAt(0) === '[') next = a.getAttribute(source.slice(1, -1));
-          if (next && /^https?:\/\//.test(next)) a.setAttribute('href', next);
-        });
-      });
+          if (next && /^https?:\/\//.test(next)) writeAttribute(a, 'href', next);
+      }, ['href'].concat(source && source.charAt(0) === '[' ? [source.slice(1, -1)] : []));
     }
   };
   // uBO's short names.
@@ -444,28 +446,124 @@ enum Scriptlets {
     if (head === '*' || head === '[]') { Object.keys(object).forEach(function (k) { remove(object[k], parts.slice(1)); }); return; }
     remove(object[head], parts.slice(1));
   }
-  function settle(behavior, run) {
-    function go() { try { run(); } catch (e) {} }
-    if (D.readyState === 'loading') D.addEventListener('DOMContentLoaded', go, { once: true }); else go();
-    if (behavior === 'stay' || /complete/.test(behavior || '')) {
-      W.addEventListener('load', go, { once: true });
-      if (behavior === 'stay') {
-        var pending = false;
-        new MutationObserver(function () {
-          if (pending) return;
-          pending = true;
-          setTimeout(function () { pending = false; go(); }, 100);
-        }).observe(D, { childList: true, subtree: true, attributes: false });
+  var persistentJobs = [], persistentObserver = null, attributeNames = new Set();
+  var ownAttributes = new WeakMap(), pendingDOM = domChanges(), persistentWork = null, persistentQueued = false;
+  function connected(n) { return n.isConnected && n.ownerDocument === D; }
+  function domChanges() { return { added: new Set(), changed: new Set(), broad: false, external: false }; }
+  function ownAttribute(el, name) {
+    if (el.namespaceURI === 'http://www.w3.org/1999/xhtml') name = name.toLowerCase();
+    if (!persistentObserver || !attributeNames.has(name)) return;
+    var counts = ownAttributes.get(el);
+    if (!counts) { counts = new Map(); ownAttributes.set(el, counts); }
+    counts.set(name, (counts.get(name) || 0) + 1);
+  }
+  function writeAttribute(el, name, value) {
+    if (el.getAttribute(name) === value) return;
+    var tracked = connected(el);
+    if (value === null) el.removeAttribute(name); else el.setAttribute(name, value);
+    if (tracked) ownAttribute(el, name);
+  }
+  function localSelector(selector) {
+    return selector && /^(?:[a-zA-Z][\w-]*|\*)?(?:[.#][\w-]+|\[[\w-]+(?:[~|^$*]?=(?:"[^"\\]*"|'[^'\\]*'|[\w-]+))?(?:\s+[iIsS])?\])*$/.test(selector);
+  }
+  function* jobNodes(job, batch) {
+    if (!batch || !job.local) {
+      if (!batch || batch.broad) {
+        try { for (var n of D.querySelectorAll(job.selector)) { yield n; } } catch (e) {}
+      }
+      return;
+    }
+    var seen = new Set();
+    for (var changed of batch.changed) {
+      for (var n = changed.nodeType === 1 ? changed : changed.parentElement; n && !seen.has(n); n = n.parentElement) {
+        seen.add(n);
+        if (connected(n)) { try { if (n.matches(job.selector)) yield n; } catch (e) {} }
+        yield null;
       }
     }
+    for (var root of batch.added) {
+      if (root.nodeType !== 1 || !connected(root)) continue;
+      var covered = false;
+      for (var p = root.parentElement; p; p = p.parentElement) { if (batch.added.has(p)) { covered = true; break; } }
+      if (covered) continue;
+      try {
+        if (!seen.has(root) && root.matches(job.selector)) { seen.add(root); yield root; }
+        for (var n of root.querySelectorAll(job.selector)) { if (!seen.has(n)) { seen.add(n); yield n; } }
+      } catch (e) {}
+    }
+  }
+  function* persistentSweep(batch) {
+    for (var job of persistentJobs) {
+      for (var n of jobNodes(job, batch)) {
+        if (n && connected(n)) { try { job.apply(n); } catch (e) {} }
+        yield;
+      }
+      yield;
+    }
+  }
+  function persistentChunk() {
+    persistentQueued = false;
+    if (!persistentWork) { persistentWork = persistentSweep(pendingDOM); pendingDOM = domChanges(); }
+    // Match the procedural worker's cooperative slice while keeping the
+    // existing debounce for persistent scriptlets.
+    var deadline = performance.now() + 4, step;
+    do { step = persistentWork.next(); } while (!step.done && performance.now() < deadline);
+    if (!step.done) { persistentQueued = true; requestAnimationFrame(persistentChunk); return; }
+    persistentWork = null;
+    if (pendingDOM.external) queuePersistent();
+  }
+  function queuePersistent() {
+    if (persistentQueued) return;
+    persistentQueued = true;
+    setTimeout(function () { requestAnimationFrame(persistentChunk); }, 100);
+  }
+  function observePersistent() {
+    if (!persistentObserver) persistentObserver = new MutationObserver(function (records) {
+      for (var r of records) {
+        if (r.type === 'attributes') {
+          // Consume only as many records as our own writes produced. If a
+          // page rewrites the same attribute, a record remains to recheck it.
+          var counts = ownAttributes.get(r.target), count = counts && counts.get(r.attributeName);
+          if (count) {
+            if (count === 1) counts.delete(r.attributeName); else counts.set(r.attributeName, count - 1);
+            if (!counts.size) ownAttributes.delete(r.target);
+            // Revisit this candidate on the next page update: this helper
+            // may have made it match an earlier helper. Do not self-schedule.
+            pendingDOM.changed.add(r.target);
+            continue;
+          }
+        } else pendingDOM.broad = true;
+        pendingDOM.external = true;
+        pendingDOM.changed.add(r.target);
+        if (r.type === 'childList') for (var n of r.addedNodes) pendingDOM.added.add(n);
+      }
+      if (pendingDOM.external) queuePersistent();
+    });
+    var options = { childList: true, subtree: true, characterData: true };
+    if (attributeNames.size) { options.attributes = true; options.attributeFilter = Array.from(attributeNames); }
+    persistentObserver.observe(D, options);
+  }
+  function settle(behavior, selector, apply, inputs) {
+    selector = selector.trim();
+    var job = { selector: selector, apply: apply, local: localSelector(selector) };
+    if (behavior === 'stay') {
+      persistentJobs.push(job);
+      if (job.local) {
+        attributeNames.add('class'); attributeNames.add('id');
+        for (var match of selector.matchAll(/\[([\w-]+)/g)) { attributeNames.add(match[1]); attributeNames.add(match[1].toLowerCase()); }
+        (inputs || []).forEach(function (name) { attributeNames.add(name); attributeNames.add(name.toLowerCase()); });
+      }
+      observePersistent();
+    }
+    function go() { for (var n of jobNodes(job, null)) { try { apply(n); } catch (e) {} } }
+    if (D.readyState === 'loading') D.addEventListener('DOMContentLoaded', go, { once: true }); else go();
+    if (behavior === 'stay' || /complete/.test(behavior || '')) W.addEventListener('load', go, { once: true });
   }
   function attributes(attrs, selector, behavior, act) {
     if (!attrs) return;
     var names = attrs.split(/\s*\|\s*/);
     var target = selector || names.map(function (n) { return '[' + CSS.escape(n) + ']'; }).join(',');
-    settle(behavior || 'stay', function () {
-      D.querySelectorAll(target).forEach(function (el) { names.forEach(function (n) { act(el, n); }); });
-    });
+    settle(behavior || 'stay', target, function (el) { names.forEach(function (n) { act(el, n); }); }, names);
   }
   function nodeText(nodeName, pattern, replacement) {
     if (!nodeName || !pattern) return;

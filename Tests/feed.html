@@ -1,0 +1,75 @@
+<!doctype html><meta charset="utf-8"><title>Growing and recycled feed</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#17191b;color:#eee;font:16px system-ui}
+main{width:720px;margin:auto}.feed-card{height:180px;padding:16px;border-bottom:1px solid #45494c}
+header{display:flex;gap:12px}.avatar{width:30px;height:30px;border-radius:50%;background:#587c88}
+p{line-height:1.5;margin:12px 0}button{margin-right:12px}video{position:fixed;top:16px;right:16px;width:256px;height:144px;background:black;z-index:1}
+#identity{position:fixed;bottom:8px;left:8px;font-size:11px}#sentinel{height:1px}
+</style>
+<div id="identity">/feed</div><div id="spacer"></div><main id="feed"></main><div id="sentinel"></div>
+<video id="movie" muted autoplay playsinline src="/video.mp4"></video>
+<script>
+const feed=document.getElementById('feed'), movie=document.getElementById('movie'), spacer=document.getElementById('spacer');
+let mode, nextID=0, limit, loading=false, scrollQueued=false, recording=false;
+function fill(card,id){
+ card.dataset.id=id;card.dataset.tracking='present';card.className='feed-card feed-helper advert';
+ if(!card.firstChild)card.innerHTML='<header><div class="avatar"></div><div><strong></strong><span> New post</span></div></header><div><p class="copy"></p><p>A second line of ordinary feed content with a <a href="#">link</a>.</p></div><footer><button>Like</button><button>Reply</button><span class="likes">0</span></footer>';
+ card.querySelector('strong').textContent='Person '+id;
+ card.querySelector('.copy').textContent=(id%10===0?'Sponsored':'Ordinary')+' post '+id;
+ card.querySelector('.likes').textContent='0';return card;
+}
+function append(items){
+ const fragment=document.createDocumentFragment();
+ const recycle=mode==='recycle'?Math.max(0,feed.children.length+items.length-limit):0;
+ const old=Array.from(feed.children).slice(0,recycle);
+ const height=old.reduce((total,card)=>total+card.getBoundingClientRect().height,0);
+ if(height)spacer.style.height=(parseFloat(spacer.style.height)||0)+height+'px';
+ items.forEach((id,i)=>fragment.append(fill(old[i]||document.createElement('article'),id)));
+ feed.append(fragment);nextID=items[items.length-1]+1;
+}
+window.setupFeed=(kind,count)=>{mode=kind;limit=count;append(Array.from({length:count},(_,i)=>i));return true};
+function media(){
+ const q=movie.getVideoPlaybackQuality();let ahead=0;
+ for(let i=0;i<movie.buffered.length;i++)if(movie.buffered.start(i)<=movie.currentTime&&movie.buffered.end(i)>=movie.currentTime)ahead=movie.buffered.end(i)-movie.currentTime;
+ const rect=movie.getBoundingClientRect();
+ return {time:movie.currentTime,ready:movie.readyState,paused:movie.paused,ended:movie.ended,error:movie.error?.code||0,
+  bufferedAhead:ahead,total:q.totalVideoFrames,dropped:q.droppedVideoFrames,width:movie.videoWidth,
+  inViewport:rect.top>=0&&rect.bottom<=innerHeight&&rect.left>=0&&rect.right<=innerWidth};
+}
+async function maybeLoad(){
+ if(!recording||loading||scrollY+innerHeight+1600<document.documentElement.scrollHeight)return;
+ loading=true;const row={cursor:nextID,start:performance.now()-feedMeasure.start};
+ try{
+  const response=await fetch('/feed-batch?cursor='+nextID);row.response=performance.now()-feedMeasure.start;
+  const data=await response.json();row.parsed=performance.now()-feedMeasure.start;
+  append(data.items);row.inserted=performance.now()-feedMeasure.start;
+  requestAnimationFrame(()=>row.nextAnimation=performance.now()-feedMeasure.start);
+ }catch(error){row.error=String(error)}
+ feedMeasure.requests.push(row);loading=false;
+}
+addEventListener('scroll',()=>{if(scrollQueued)return;scrollQueued=true;requestAnimationFrame(()=>{scrollQueued=false;maybeLoad()})},{passive:true});
+['waiting','stalled','playing','seeking','seeked'].forEach(type=>movie.addEventListener(type,()=>{
+ if(recording)feedMeasure.mediaEvents.push({type,at:performance.now()-feedMeasure.start,...media()});
+}));
+window.startFeed=duration=>{
+ const out=window.feedMeasure={start:performance.now(),duration,done:false,frames:[],videoFrames:[],requests:[],mediaEvents:[],buffers:[],updates:0,
+  before:media(),initialItems:nextID,initialRetained:feed.children.length,scrollStart:scrollY};
+ recording=true;let last;
+ const update=setInterval(()=>{const card=feed.lastElementChild;if(card){card.querySelector('.likes').firstChild.data=String(++out.updates)}},200);
+ const buffer=setInterval(()=>out.buffers.push({at:performance.now()-out.start,...media()}),500);
+ function videoFrame(now,metadata){
+  if(!recording)return;
+  out.videoFrames.push([now-out.start,metadata.mediaTime,metadata.presentedFrames,metadata.processingDuration,metadata.expectedDisplayTime-now]);
+  movie.requestVideoFrameCallback(videoFrame);
+ }
+ movie.requestVideoFrameCallback(videoFrame);
+ function frame(now){
+  if(last!==undefined)out.frames.push([now-out.start,now-last]);last=now;
+  if(now-out.start<duration){requestAnimationFrame(frame);return}
+  clearInterval(update);clearInterval(buffer);recording=false;
+  out.done=true;out.hidden=document.hidden;out.after=media();out.scrollEnd=scrollY;
+  out.logicalItems=nextID;out.retained=feed.children.length;out.elements=document.querySelectorAll('*').length;
+ }
+ requestAnimationFrame(frame);maybeLoad();return true;
+};
+</script>

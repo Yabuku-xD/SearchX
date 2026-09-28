@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """Repeatable native-browser rendering workload; never uses an ordinary profile."""
 import argparse
+import hashlib
 import json
 import os
 import plistlib
 import runpy
+import shlex
 import statistics
 import subprocess
+import sys
 import threading
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlparse, parse_qs
 
 ROOT = Path(__file__).resolve().parents[1]
 SUPPORT = runpy.run_path(str(ROOT / 'Tests/chrome_support.py'))
@@ -104,6 +108,160 @@ def summary(intervals, target_hz):
     return result
 
 
+def run_feed(args):
+    """Long native-wheel run with real filter installation and local media/API I/O."""
+    video_path = Path(args.video).resolve()
+    video = video_path.read_bytes()
+    fixture = (ROOT/'Tests/feed.html').read_bytes()
+    batch_size, response_delay = 25, .080
+
+    class FeedFixture(BaseHTTPRequestHandler):
+        def do_GET(self):
+            url = urlparse(self.path)
+            headers = {'Cache-Control': 'no-store'}
+            status = 200
+            if url.path == '/video.mp4':
+                start, end = 0, len(video)-1
+                if self.headers.get('Range', '').startswith('bytes='):
+                    bounds = self.headers['Range'][6:].split('-')
+                    start = int(bounds[0] or 0)
+                    end = min(int(bounds[1]) if bounds[1] else end, end)
+                    status = 206
+                    headers['Content-Range'] = f'bytes {start}-{end}/{len(video)}'
+                body, kind = video[start:end+1], 'video/mp4'
+                headers['Accept-Ranges'] = 'bytes'
+            elif url.path == '/feed-batch':
+                cursor = int(parse_qs(url.query)['cursor'][0])
+                time.sleep(response_delay)
+                body = json.dumps({'items': list(range(cursor, cursor+batch_size))}).encode()
+                kind = 'application/json'
+            else:
+                body, kind = fixture, 'text/html; charset=utf-8'
+            self.send_response(status)
+            for key, value in headers.items(): self.send_header(key, value)
+            self.send_header('Content-Type', kind)
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            try: self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError): pass
+
+        def log_message(self, *_): pass
+
+    args.world = 'feed-' + uuid.uuid4().hex[:10]
+    if args.test_scheduling:
+        os.environ.pop('SEARCH_MEASURE', None)
+    else:
+        os.environ['SEARCH_MEASURE'] = '1'
+    server = ThreadingHTTPServer(('127.0.0.1', 0), FeedFixture)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    run = SUPPORT['Run'](args, f'http://127.0.0.1:{server.server_port}')
+    artifact = ROOT/'.local-performance'/(args.label+'-'+args.world)
+    artifact.mkdir(parents=True)
+    (artifact/'fixture.html').write_bytes(fixture)
+    filters = '''127.0.0.1##.feed-card:has-text(Sponsored)
+127.0.0.1##.feed-card:has-text(CommercialA)
+127.0.0.1##.feed-card:has-text(CommercialB)
+127.0.0.1##+js(remove-attr, data-tracking, .feed-helper, stay)
+127.0.0.1##+js(remove-class, advert, .feed-helper, stay)
+127.0.0.1##+js(set-attr, .feed-helper, data-clean, true)
+'''
+    instrument = r'''(()=>{
+      window.feedCosts={queries:0,candidates:0,queryMs:0,chunks:0,chunkMs:0,maxChunkMs:0};
+      const original=Document.prototype.querySelectorAll;
+      Document.prototype.querySelectorAll=function(selector){
+        const start=performance.now(),result=original.call(this,selector);
+        if(selector==='.feed-card'||selector==='.feed-helper'){
+          feedCosts.queries++;feedCosts.candidates+=result.length;feedCosts.queryMs+=performance.now()-start;
+        }return result;
+      };
+      const raf=requestAnimationFrame;
+      window.requestAnimationFrame=function(fn){return raf.call(window,function(t){
+        const start=performance.now();try{return fn(t)}finally{
+          if(fn.name==='chunk'||fn.name==='persistentChunk'){
+            const ms=performance.now()-start;feedCosts.chunks++;feedCosts.chunkMs+=ms;feedCosts.maxChunkMs=Math.max(feedCosts.maxChunkMs,ms);
+          }
+        }
+      })};return true;
+    })()'''
+    run.report.update(mode=args.feed, duration=args.seconds, initialCards=args.feed_cards,
+        targetHz=120 if args.rate=='fast' else 60, resources=[], browserWork=[],
+        video=str(video_path), videoSHA256=hashlib.sha256(video).hexdigest(),
+        fixtureResponseDelayMs=response_delay*1000, fixtureBatchSize=batch_size,
+        scheduling='test activity and inactive-page overrides' if args.test_scheduling else 'shipping background policies',
+        command=' '.join(shlex.quote(part) for part in ['python3',*sys.argv]),
+        measurement='Headless animation/video callbacks, not physical display presentation; CPU/RSS excludes GPU/network.')
+    try:
+        run.prepare()
+        (run.profile/'session.json').unlink()
+        (run.profile/'filters').mkdir()
+        (run.profile/'filters/mine.txt').write_text(filters)
+        (artifact/'filters.txt').write_text(filters)
+        run.launch()
+        run.ask('ui', sidebar=False, pages120=args.rate=='fast')
+        run.ask('resize', width=1280, height=900, steps=1)
+        tab = run.open('/feed')
+        run.ask('native', action='performance', render=True)
+        run.js(tab, f'setupFeed({json.dumps(args.feed)},{args.feed_cards})')
+        until = time.monotonic()+20
+        ready = False
+        while time.monotonic()<until:
+            ready = run.js(tab, "movie.readyState>=3 && !movie.paused && movie.currentTime>0 && getComputedStyle(feed.firstElementChild).display==='none' && feed.lastElementChild.dataset.clean==='true'")
+            if ready: break
+            time.sleep(.1)
+        run.check(ready, 'video plays and installed filters/helpers have applied')
+        run.js(tab, 'scrollTo(0,document.documentElement.scrollHeight-innerHeight-2400);true')
+        time.sleep(.5)
+        run.js(tab, instrument)
+        run.ask('eval', id=tab, world='search', js=instrument)
+        native = run.ask('native', action='performance', reset=True)
+        run.report['resources'].append(process_sample(run.process.pid, native['webPIDs']))
+        run.js(tab, f'startFeed({args.seconds*1000})')
+        before_url = next(t['url'] for t in run.ask('tabs')['tabs'] if t['id']==tab)
+        # The wheel command returns immediately. A long pull waits until its
+        # gesture ends, exceeding the automation interface's reply deadline.
+        wheel = run.ask('wheel', pixels=-15.0, count=round(args.seconds*120), ms=1000/120)
+        deadline = time.monotonic()+args.seconds+20
+        while time.monotonic()<deadline:
+            time.sleep(1)
+            run.report['resources'].append(process_sample(run.process.pid, native['webPIDs']))
+            costs = {'time': time.monotonic(), 'page': run.js(tab, 'feedCosts'),
+                     'filters': run.ask('eval', id=tab, world='search', js='feedCosts').get('value')}
+            run.report['browserWork'].append(costs)
+            if run.js(tab, 'feedMeasure.done'): break
+        result = run.js(tab, 'feedMeasure')
+        run.report['feed'] = result
+        after_url = next(t['url'] for t in run.ask('tabs')['tabs'] if t['id']==tab)
+        run.report['scroll'] = {'before': before_url, 'after': after_url, **wheel}
+        target = run.report['targetHz']
+        run.report['frameTiming'] = summary([pair[1] for pair in result['frames']], target)
+        run.report['segments'] = []
+        for start in range(0, round(args.seconds*1000), 10000):
+            intervals = [delta for at, delta in result['frames'] if start<=at<start+10000]
+            run.report['segments'].append({'startMs': start, **summary(intervals, target)})
+        before, after = run.report['resources'][0], run.report['resources'][-1]
+        run.report['appCPUPercent'] = 100*(after['appCPUSeconds']-before['appCPUSeconds'])/(after['time']-before['time'])
+        run.report['contentCPUPercent'] = 100*(after['contentCPUSeconds']-before['contentCPUSeconds'])/(after['time']-before['time'])
+        run.check(result['done'] and not result['hidden'], 'long feed completes with document visibility reported as visible')
+        run.check(wheel.get('sent')==round(args.seconds*120) and before_url==after_url, 'native scroll preserves navigation')
+        run.check(result['scrollEnd']-result['scrollStart']>1000, 'native wheel actually scrolls the feed')
+        run.check(len(result['requests'])>=2 and all('error' not in r for r in result['requests']), 'feed loads repeated response batches')
+        run.check(result['logicalItems']>result['initialItems'], 'new feed items arrive during scrolling')
+        if args.feed=='recycle': run.check(result['retained']==args.feed_cards, 'recycled feed keeps its DOM row count stable')
+        else: run.check(result['retained']>args.feed_cards, 'retained feed grows throughout the run')
+        run.check(result['after']['inViewport'] and not result['after']['paused'] and not result['after']['error'] and result['after']['time']-result['before']['time']>args.seconds*.8, 'visible video continues through the feed run')
+        run.report['passed'] = True
+        print(json.dumps({'mode': args.feed, 'timing': run.report['frameTiming'],
+                          'items': result['logicalItems'], 'retained': result['retained']}), flush=True)
+    except Exception as error:
+        run.report.update(passed=False, error=str(error))
+        raise
+    finally:
+        (artifact/'result.json').write_text(json.dumps(run.report, indent=2))
+        run.stop()
+        server.shutdown()
+        print('Artifact:', artifact, flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--binary', required=True, help='Explicit immutable baseline or optimized current probe binary')
@@ -117,7 +275,21 @@ def main():
     parser.add_argument('--rate', choices=['fast','default','mixed'], default='fast')
     parser.add_argument('--particles', type=int, default=400)
     parser.add_argument('--wheel', action='store_true')
+    parser.add_argument('--feed', choices=['grow','recycle'], help='Long feed, network and visible-video workload')
+    parser.add_argument('--feed-cards', type=int, default=200)
+    parser.add_argument('--video', help='Local MP4 longer than --seconds, used only by --feed')
+    parser.add_argument('--test-scheduling', action='store_true',
+                        help='Feed diagnostic: use existing test activity/background overrides to check for headless throttling')
     args = parser.parse_args()
+    if args.feed:
+        if not args.video or not Path(args.video).is_file(): parser.error('--feed requires --video pointing to a local MP4')
+        if args.seconds<20: parser.error(f'--feed needs at least 20 seconds for repeated batches; requested {args.seconds}')
+        if args.feed_cards<25: parser.error(f'--feed-cards must fit a 25-post response batch; requested {args.feed_cards}')
+        if args.rate=='mixed': parser.error('--feed measures one --rate per run; choose fast or default')
+        run_feed(args)
+        return
+    if args.test_scheduling:
+        parser.error('--test-scheduling is a diagnostic for --feed runs')
     global HTML
     HTML = HTML.replace('i<400',f'i<{args.particles}')
     args.world = 'perf-' + uuid.uuid4().hex[:10]

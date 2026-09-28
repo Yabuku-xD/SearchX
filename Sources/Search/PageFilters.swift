@@ -149,12 +149,18 @@ enum PageFilters {
         if (NESTED[t.op]) { step.sub = compile(/^\s*[>+~]/.test(t.arg) ? t.arg : t.arg); if (!step.sub) return null; step.relative = /^\s*[>+~]/.test(t.arg); }
         steps.push(step);
       }
-      return { steps: steps, action: action, watch: list.filter(function (t) { return t.op === 'watch-attr'; }).map(function (t) { return t.arg; }) };
+      // Only an element's own selector and text/attributes can be invalidated
+      // locally. Relationships, style, XPath and nested selectors keep a sweep.
+      var css = steps.length && steps[0].css !== undefined ? steps[0].css.trim() : '';
+      var local = css && /^(?:[a-zA-Z][\w-]*|\*)?(?:[.#][\w-]+|\[[\w-]+(?:[~|^$*]?=(?:"[^"\\]*"|'[^'\\]*'|[\w-]+))?(?:\s+[iIsS])?\])*$/.test(css)
+        && steps.slice(1).every(function (s) { return /^(has-text|contains|-abp-contains|min-text-length|matches-attr|watch-attr)$/.test(s.op || ''); });
+      return { steps: steps, action: action, local: local ? css : null,
+        watch: list.filter(function (t) { return t.op === 'watch-attr'; }).map(function (t) { return t.arg; }) };
     }
     function unique(list) { var out = [], seen = new Set(); list.forEach(function (n) { if (n && !seen.has(n)) { seen.add(n); out.push(n); } }); return out; }
-    function* run(task, from) {
-      var nodes = null;
-      for (var i = 0; i < task.steps.length; i++) {
+    function* run(task, from, seeds) {
+      var nodes = seeds || null;
+      for (var i = seeds ? 1 : 0; i < task.steps.length; i++) {
         var s = task.steps[i];
         if (s.css !== undefined) {
           var css = s.css;
@@ -219,7 +225,7 @@ enum PageFilters {
     var tasks = [];
     mine.forEach(function (selector) { var t = compile(selector); if (t) tasks.push(t); });
     if (!tasks.length) return;
-    var mark = 'searchx-veil', styles = [];
+    var mark = 'searchx-veil';
     var sheet = document.createElement('style');
     sheet.textContent = '[' + mark + ']{display:none!important}';
     tasks.forEach(function (t, i) {
@@ -230,36 +236,101 @@ enum PageFilters {
       }
     });
     function attach() { var root = document.head || document.documentElement; if (root && !sheet.isConnected) root.appendChild(sheet); }
-    var shown = tasks.map(function () { return new Set(); });
-    function* sweep() {
+    var shown = tasks.map(function () { return new Set(); }), hides = new WeakMap(), ownAttributes = new WeakMap();
+    var marked = '[' + mark + ']' + tasks.map(function (t, i) { return t.action.type === 'style' ? ',[searchx-style-' + i + ']' : ''; }).join('');
+    function connected(n) { return n.isConnected && n.ownerDocument === document; }
+    function marker(n, attr, value) {
+      if (n.getAttribute(attr) === value) return;
+      var tracked = connected(n);
+      if (value === null) n.removeAttribute(attr); else n.setAttribute(attr, value);
+      if (tracked) {
+        var counts = ownAttributes.get(n);
+        if (!counts) { counts = new Map(); ownAttributes.set(n, counts); }
+        counts.set(attr, (counts.get(attr) || 0) + 1);
+      }
+    }
+    function release(i, n, unhide) {
+      if (!shown[i].delete(n)) return;
+      if (tasks[i].action.type === 'hide') {
+        var count = (hides.get(n) || 1) - 1;
+        if (count) hides.set(n, count); else { hides.delete(n); unhide.add(n); }
+      } else marker(n, 'searchx-style-' + i, null);
+    }
+    function* candidates(t, i, batch) {
+      var found = new Set(), visited = new Set();
+      function consider(n) {
+        if (!n || n.nodeType !== 1 || !connected(n)) return;
+        try { if (shown[i].has(n) || n.matches(t.local)) found.add(n); } catch (e) {}
+      }
+      // A detached subtree can be edited before our queued work runs, then
+      // returned with different selectors and none of its old markers.
+      if (batch.removed) for (var n of shown[i]) { found.add(n); yield; }
+      for (var changed of batch.changed) {
+        for (var n = changed.nodeType === 1 ? changed : changed.parentElement; n && !visited.has(n); n = n.parentElement) {
+          visited.add(n); consider(n); yield;
+        }
+      }
+      for (var root of batch.added) {
+        if (root.nodeType !== 1 || !connected(root)) continue;
+        var covered = false;
+        for (var p = root.parentElement; p; p = p.parentElement) { if (batch.added.has(p)) { covered = true; break; } }
+        if (covered) continue;
+        consider(root);
+        // Include an old match whose class changed while its subtree moved.
+        try { for (var n of root.querySelectorAll(t.local + ',' + marked)) { consider(n); yield; } } catch (e) {}
+        yield;
+      }
+      return found;
+    }
+    function* sweep(batch, full) {
       attach();
+      var unhide = new Set();
+      if (batch.removed) for (var i = 0; i < tasks.length; i++) {
+        for (var n of shown[i]) { if (!connected(n)) release(i, n, unhide); yield; }
+      }
       for (var i = 0; i < tasks.length; i++) {
-        var t = tasks[i], now = new Set(yield* run(t, null));
+        var t = tasks[i], affected = null, seeds = undefined;
+        if (!full && !t.local && !batch.broad) continue;
+        if (!full && t.local) {
+          affected = yield* candidates(t, i, batch); seeds = [];
+          for (var n of affected) { try { if (connected(n) && n.matches(t.local)) seeds.push(n); } catch (e) {} yield; }
+        }
+        var now = new Set(yield* run(t, null, seeds));
         var type = t.action.type;
         if (type === 'hide' || type === 'style') {
           var attr = type === 'hide' ? mark : 'searchx-style-' + i;
-          for (var n of shown[i]) { if (!now.has(n)) n.removeAttribute(attr); yield; }
-          for (var n of now) { if (n.isConnected && !n.hasAttribute(attr)) n.setAttribute(attr, ''); yield; }
-          shown[i] = now;
+          for (var n of affected || shown[i]) { if (!now.has(n)) release(i, n, unhide); yield; }
+          for (var n of now) {
+            if (connected(n)) {
+              if (!shown[i].has(n)) { shown[i].add(n); if (type === 'hide') hides.set(n, (hides.get(n) || 0) + 1); }
+              if (!n.hasAttribute(attr)) marker(n, attr, '');
+            }
+            yield;
+          }
         } else if (type === 'remove') {
           for (var n of now) { n.remove(); yield; }
         } else if (type === 'remove-attr' || type === 'remove-class') {
           var test = needle(t.action.arg.replace(/^"|"$/g, ''));
           for (var n of now) {
-            if (type === 'remove-attr') Array.from(n.attributes).forEach(function (a) { if (test(a.name)) n.removeAttribute(a.name); });
+            if (type === 'remove-attr') Array.from(n.attributes).forEach(function (a) {
+              if (test(a.name)) { if (markers.has(a.name)) marker(n, a.name, null); else n.removeAttribute(a.name); }
+            });
             else Array.from(n.classList).forEach(function (c) { if (test(c)) n.classList.remove(c); });
             yield;
           }
         }
       }
+      // A different rule may still hide the same recycled post.
+      for (var n of unhide) { if (!hides.has(n)) marker(n, mark, null); yield; }
     }
-    // uBO's DOM survey uses a 4 ms slice. At 120 Hz this leaves over half
-    // the frame for the page. Yield within selectors as well as between
-    // rules, and resume every rule; an expensive filter is never disabled.
+    function changes() { return { added: new Set(), changed: new Set(), removed: false, broad: false }; }
+    var pending = changes(), initial = true;
+    // Keep the existing 4 ms cooperative budget. One DOM operation can still
+    // exceed it; all rules resume, including those that need the whole page.
     var queued = false, last = 0, work = null, dirty = false;
     function chunk() {
       queued = false;
-      if (!work) { dirty = false; last = Date.now(); work = sweep(); }
+      if (!work) { dirty = false; last = Date.now(); work = sweep(pending, initial); pending = changes(); initial = false; }
       var deadline = performance.now() + 4, step;
       do { step = work.next(); } while (!step.done && performance.now() < deadline);
       if (!step.done) { queued = true; requestAnimationFrame(chunk); return; }
@@ -275,10 +346,39 @@ enum PageFilters {
     }
     var watched = [];
     tasks.forEach(function (t) { t.watch.forEach(function (w) { w.split(',').forEach(function (a) { if (a.trim()) watched.push(a.trim()); }); }); });
+    var markers = new Set([mark]), attributes = new Set(watched), anyAttribute = false;
+    tasks.forEach(function (t, i) {
+      if (t.action.type === 'style') markers.add('searchx-style-' + i);
+      if (!t.local) return;
+      attributes.add('class'); attributes.add('id');
+      for (var match of t.local.matchAll(/\[([\w-]+)/g)) { attributes.add(match[1]); attributes.add(match[1].toLowerCase()); }
+      if (t.steps.some(function (s) { return s.op === 'matches-attr'; })) anyAttribute = true;
+    });
+    markers.forEach(function (name) { attributes.add(name); });
     function start() {
-      var options = { subtree: true, childList: true, characterData: true };
-      if (watched.length) { options.attributes = true; options.attributeFilter = watched; }
-      new MutationObserver(soon).observe(document.documentElement, options);
+      var options = { subtree: true, childList: true, characterData: true, attributes: true };
+      if (!anyAttribute) options.attributeFilter = Array.from(attributes);
+      new MutationObserver(function (records) {
+        var changed = false;
+        for (var r of records) {
+          if (r.type === 'attributes') {
+            var counts = ownAttributes.get(r.target), count = counts && counts.get(r.attributeName);
+            if (count) {
+              if (count === 1) counts.delete(r.attributeName); else counts.set(r.attributeName, count - 1);
+              if (!counts.size) ownAttributes.delete(r.target);
+              continue;
+            }
+            if (watched.indexOf(r.attributeName) !== -1 || markers.has(r.attributeName)) pending.broad = true;
+          } else pending.broad = true;
+          changed = true;
+          pending.changed.add(r.target);
+          if (r.type === 'childList') {
+            for (var n of r.addedNodes) pending.added.add(n);
+            for (var n of r.removedNodes) if (n.nodeType === 1) pending.removed = true;
+          }
+        }
+        if (changed) soon();
+      }).observe(document.documentElement, options);
       soon();
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true }); else start();
