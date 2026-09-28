@@ -172,6 +172,16 @@ enum ExtensionShims {
     /// The shim as this extension gets it: with the events its code mentions
     /// — `chrome.tabs.onUpdated`, `e.runtime.onInstalled` — so its worker
     /// can take their listeners late (see the end of the script).
+    /// Whether the extension in `folder` has scripts in the page's own world,
+    /// which Search's passkey patch goes in ahead of (see `prepare`): a
+    /// password manager's, taking the page's passkey requests.
+    nonisolated static func carriesPasskeys(_ folder: URL) -> Bool {
+        guard let data = try? Data(contentsOf: folder.appendingPathComponent("manifest.json")),
+              let manifest = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let entries = manifest["content_scripts"] as? [[String: Any]] else { return false }
+        return entries.contains { ($0["js"] as? [String])?.contains(passkeys) == true }
+    }
+
     nonisolated static func shim(for folder: URL) -> String {
         var found = Set<String>()
         let pattern = try! NSRegularExpression(pattern: #"\.([a-zA-Z]+)\.(on[A-Z][A-Za-z]+)\b"#)

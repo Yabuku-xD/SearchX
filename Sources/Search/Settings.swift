@@ -261,6 +261,7 @@ struct SettingsPanel: View {
                             .foregroundStyle(Palette.muted.opacity(0.8))
                     }
                     TextField("", text: $prefs.customEngine)
+                        .accessibilityLabel("Search address, with %s where your words go")
                         .textFieldStyle(.plain)
                         .foregroundStyle(Palette.ink)
                 }
@@ -278,10 +279,12 @@ struct SettingsPanel: View {
             ForEach($prefs.keywords) { $entry in
                 HStack(spacing: 8) {
                     TextField("yt", text: $entry.keyword)
+                        .accessibilityLabel("Shortcut word")
                         .textFieldStyle(.plain)
                         .frame(width: 50)
                     Text("→").foregroundStyle(Palette.muted)
                     TextField("https://www.youtube.com/results?search_query=%s", text: $entry.template)
+                        .accessibilityLabel("Site search address, with %s where your words go")
                         .textFieldStyle(.plain)
                     Button {
                         prefs.keywords.removeAll { $0.id == entry.id }
@@ -513,7 +516,7 @@ struct SettingsPanel: View {
                     Segmented(options: SidebarPosition.allCases.map { ($0, $0.title) }, selection: $prefs.sidePosition)
                 }
                 Rule()
-                Line("Hide the sidebar until the pointer reaches the edge", "The page takes the whole window; push against its \(prefs.sidePosition.rawValue) edge for the tabs. ⌘S keeps them out.") {
+                Line("Hide the sidebar until the pointer reaches the edge", "The page takes the whole window; push against its \(prefs.sidePosition.rawValue) edge for the tabs.\(browser.shortcuts.key(for: "view.fold").map { " \($0.display) keeps them out." } ?? "")") {
                     Switch(on: $prefs.sideHides)
                 }
                 if prefs.sideHides {

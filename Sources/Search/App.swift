@@ -395,7 +395,6 @@ struct ContentView: View {
             // again thirty times a second, the page juddered along its right
             // edge and overshot the window with the spring (see `room`). The
             // column is the exception: the page narrows and widens with it.
-            if let tab = window.active { WallpaperView(tab: tab) }
             stage
                 .padding(.leading, sideOnRight ? 0 : roomed.width)
                 .padding(.trailing, (sideOnRight ? roomed.width : 0) + panelWidth)

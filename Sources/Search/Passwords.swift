@@ -292,6 +292,7 @@ struct PasswordsPanel: View {
                     Text(name).foregroundStyle(Palette.ink.opacity(0.3)).padding(.leading, 10)
                 }
                 TextField("", text: text)
+                    .accessibilityLabel(name)
                     .textFieldStyle(.plain)
                     .foregroundStyle(Palette.ink)
                     .focused($focus, equals: tag)

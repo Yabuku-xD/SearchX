@@ -1,6 +1,7 @@
 #if DEBUG
 import AppKit
 import ScreenCaptureKit
+import WebKit
 
 /// Native appearance checks in an isolated SEARCH_PROBE process only.
 @MainActor
@@ -241,6 +242,13 @@ enum NativeProbe {
                                                   windowNumber: window.windowNumber, context: nil, eventNumber: 0,
                                                   clickCount: clicks, pressure: type == .leftMouseUp ? 0 : 1) {
                     guard let target else { NSApp.postEvent(event, atStart: false); return }
+                    // A page takes its presses through the window, which
+                    // WebKit reads them from; handed to the view, they never
+                    // reached the page.
+                    if sequence(first: target, next: { $0.superview }).contains(where: { $0 is WKWebView }) {
+                        window.sendEvent(event)
+                        return
+                    }
                     switch type {
                     case .leftMouseDown: target.mouseDown(with: event)
                     case .leftMouseDragged: target.mouseDragged(with: event)

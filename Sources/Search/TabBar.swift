@@ -68,6 +68,10 @@ struct TabBar: View {
                                             pills(window.tabs.filter { $0.pin != nil }, group: nil, in: geo.size.width)
                                             ForEach(window.tabGroups) { group in
                                                 GroupHeading(window: window, group: group, horizontal: true, dragSpace: "strip")
+                                                    .overlay(alignment: .bottomLeading) {
+                                                        // Starts under the group's icon and runs on under its tabs.
+                                                        GroupRule(lead: 10 + 7.5, last: window.visibleTabs(in: group).isEmpty)
+                                                    }
                                                 pills(window.visibleTabs(in: group), group: group.id, in: geo.size.width)
                                             }
                                             pills(window.tabs(in: nil), group: nil, in: geo.size.width)
@@ -196,6 +200,10 @@ struct TabBar: View {
                     live: tab.id == window.activeID, width: width(in: strip),
                     room: strip - Metrics.lights - leading - 12, pill: pill,
                     close: { window.close(tab) })
+                // A group's tabs sit on its line, which stops at the last of them.
+                .overlay(alignment: .bottomLeading) {
+                    if group != nil { GroupRule(lead: 0, last: index == tabs.count - 1) }
+                }
                 .modifier(Carried(index: index, count: tabs.count,
                                   step: (tab.pin != nil ? Metrics.pinWidth : width(in: strip)) + Metrics.tabGap,
                                   vertical: false, space: "strip", move: {
@@ -353,20 +361,22 @@ struct Helm: View {
         let window: WindowModel
         @ObservedObject var tab: Tab
 
+        private var keys: ShortcutStore { window.profile.shortcuts }
+
         var body: some View {
             let back = !tab.isBlank && tab.canGoBack
             let forward = !tab.isBlank && tab.canGoForward
             HStack(spacing: 4) {
-                Door(icon: "chevron.left", help: "Back   ⌘[") { window.back() }
+                Door(icon: "chevron.left", help: keys.tip("Back", "tabs.back")) { window.back() }
                     .disabled(!back)
                     .opacity(back ? 1 : 0.3)
-                Door(icon: "chevron.right", help: "Forward   ⌘]") { window.forward() }
+                Door(icon: "chevron.right", help: keys.tip("Forward", "tabs.forward")) { window.forward() }
                     .disabled(!forward)
                     .opacity(forward ? 1 : 0.3)
                 // Reload, or stop while it is still coming.
                 Door(
                     icon: tab.loading ? "xmark" : "arrow.clockwise",
-                    help: tab.loading ? "Stop   ⌘." : "Reload   ⌘R"
+                    help: tab.loading ? keys.tip("Stop", "view.stop") : keys.tip("Reload", "view.reload")
                 ) {
                     if tab.loading { tab.stop() } else { window.reload() }
                 }
@@ -1151,5 +1161,24 @@ struct PinField: NSViewRepresentable {
             let window = self.window
             DispatchQueue.main.async { window.endPinEdit() }
         }
+    }
+}
+
+/// A group's line along the strip, under its heading and each of its tabs:
+/// joined across the gaps between them, and stopping short at the group's
+/// last tab — the tabs past it are in no group, or the next one's.
+private struct GroupRule: View {
+    let lead: CGFloat
+    let last: Bool
+
+    var body: some View {
+        GeometryReader { box in
+            Capsule()
+                .fill(Palette.faint)
+                .frame(width: max(0, box.size.width - lead + (last ? -6 : Metrics.tabGap)), height: 1.5)
+                .offset(x: lead, y: box.size.height + 3)
+        }
+        .accessibilityHidden(true)
+        .allowsHitTesting(false)
     }
 }

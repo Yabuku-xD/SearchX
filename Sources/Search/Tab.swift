@@ -731,9 +731,10 @@ final class Tab: ObservableObject, Identifiable {
         // page's functions — and reach SearchX through a bridge in its own.
         // The bridge stays either way: an extension's page script can carry
         // the patch (see Passkeys.swift and ExtensionShims.passkeys).
-        if FormRelay.passkeysOffered {
+        if FormRelay.passkeysOffered || PasskeyRelay.extensionKeeps {
             controller.addUserScript(
-                WKUserScript(source: PasskeyRelay.page, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page)
+                WKUserScript(source: FormRelay.passkeysOffered ? PasskeyRelay.page : PasskeyRelay.pageForKeeper,
+                             injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page)
             )
         }
         controller.addUserScript(

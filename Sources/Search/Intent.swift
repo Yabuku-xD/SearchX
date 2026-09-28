@@ -76,6 +76,45 @@ enum Intent {
         return a == b
     }
 
+    /// A sign-in with another site: the page's "Continue with Google" or
+    /// "Sign in with Apple", in a window of its own or in the tab. Never
+    /// stopped, whatever was clicked to ask for it and whatever a list says
+    /// about the host — a sign-in stopped is a button that does nothing, and
+    /// these are the providers' own addresses, not an ad's.
+    nonisolated static func signIn(_ url: URL?) -> Bool {
+        guard let url, url.scheme?.lowercased() == "https", let host = url.host()?.lowercased() else { return false }
+        let path = url.path.lowercased()
+        for (provider, paths) in signInPages {
+            guard host == provider || host.hasSuffix("." + provider) else { continue }
+            if paths.isEmpty || paths.contains(where: { path.hasPrefix($0) }) { return true }
+        }
+        return false
+    }
+
+    /// Each provider's host (and its subdomains), and where on it a sign-in
+    /// is; none listed, anywhere on it.
+    private nonisolated static let signInPages: [(String, [String])] = [
+        ("accounts.google.com", []),
+        ("appleid.apple.com", ["/auth/", "/appleauth/"]),
+        ("login.microsoftonline.com", []), ("login.live.com", []), ("login.windows.net", []),
+        ("account.live.com", []), ("login.microsoft.com", []),
+        ("facebook.com", ["/dialog/oauth", "/v", "/login"]),
+        ("github.com", ["/login"]),
+        ("x.com", ["/i/oauth2/", "/oauth/"]), ("twitter.com", ["/i/oauth2/", "/oauth/"]),
+        ("discord.com", ["/oauth2/", "/api/oauth2/"]),
+        ("id.twitch.tv", []),
+        ("slack.com", ["/oauth", "/openid"]),
+        ("linkedin.com", ["/oauth"]),
+        ("accounts.spotify.com", []),
+        ("login.yahoo.com", []), ("api.login.yahoo.com", []),
+        ("gitlab.com", ["/oauth", "/users/sign_in"]),
+        ("amazon.com", ["/ap/oa"]),
+        ("id.atlassian.com", []), ("auth.atlassian.com", []),
+        ("auth0.com", []), ("okta.com", []), ("oktapreview.com", []),
+        ("steamcommunity.com", ["/openid"]),
+        ("accounts.zoho.com", []), ("login.salesforce.com", []),
+    ]
+
     /// A page asking for a new window.
     static func window(to url: URL?, page: String?, press: Press?, now: TimeInterval) -> Verdict {
         guard let press, now - press.at < reach else { return .allow }

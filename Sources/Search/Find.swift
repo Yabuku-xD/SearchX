@@ -19,13 +19,14 @@ struct FindBar: View {
                     .foregroundStyle(Palette.ink)
                     .focused($focused)
                     .onSubmit { window.look(forward: true) }
+                    .accessibilityLabel("Find on page")
             }
             .font(.system(size: 12.5))
             .frame(width: 160)
 
-            step("chevron.up") { window.look(forward: false) }
-            step("chevron.down") { window.look(forward: true) }
-            step("xmark") { window.closeFind() }
+            step("chevron.up", "Previous match", window.profile.shortcuts.tip("Previous match", "edit.findPrevious")) { window.look(forward: false) }
+            step("chevron.down", "Next match", window.profile.shortcuts.tip("Next match", "edit.findNext")) { window.look(forward: true) }
+            step("xmark", "Close", "Close   esc") { window.closeFind() }
         }
         .padding(.leading, 16)
         .padding(.trailing, 8)
@@ -45,7 +46,8 @@ struct FindBar: View {
         .onChange(of: window.findFocus) { _, _ in focused = true }
     }
 
-    private func step(_ icon: String, action: @escaping () -> Void) -> some View {
+    /// An arrow or the cross, named for what it does, with its key.
+    private func step(_ icon: String, _ name: String, _ help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: Symbols.current(icon))
                 .font(.system(size: 9, weight: .semibold))
@@ -54,5 +56,7 @@ struct FindBar: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(name)
     }
 }

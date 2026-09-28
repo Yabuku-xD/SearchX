@@ -1522,14 +1522,16 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
     ) -> WKWebView? {
         if let url = action.request.url, SpeedDial.at(url) { return nil }
         let opener = tab(for: webView)
+        // A sign-in with another site opens, whatever asked for it (see Intent.signIn).
+        let signIn = Intent.signIn(action.request.url)
         // A window onto a pop-up or pop-under network never opens (uBO's
         // $popup). WebKit's blocker stops most before they get here; this
         // catches one a click on the page asked for by name.
-        if Shield.shared.refusesPopup(to: action.request.url, from: webView.url?.host()?.lowercased()) { return nil }
+        if !signIn, Shield.shared.refusesPopup(to: action.request.url, from: webView.url?.host()?.lowercased()) { return nil }
         // And by what the click that asked for it landed on (see Intent).
         let page = webView.url?.host()?.lowercased()
         var watched: String?
-        if let opener, Shield.shared.judges(page) {
+        if let opener, !signIn, Shield.shared.judges(page) {
             let now = ProcessInfo.processInfo.systemUptime
             switch Intent.window(to: action.request.url, page: page, press: opener.press, now: now) {
             case .block(let why):
@@ -1558,6 +1560,20 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         // The tab belongs in the window that asked for it, not whatever
         // window happens to be key.
         let home = opener?.owner ?? key
+        // A window the page sized for itself — a sign-in, a payment — is a
+        // small window over the page (see LittleWindow.popup), unless it is
+        // one being watched, which goes on as a tab (see refuses).
+        if tab.popup, watched == nil, let home {
+            home.prepare(tab)
+            tab.opener = from
+            if let url = action.request.url { tab.setAddressOptimistically(url) }
+            let size = windowFeatures.width.flatMap { width in
+                windowFeatures.height.map { CGSize(width: width.doubleValue, height: $0.doubleValue) }
+            }
+            let parked = Store.testing && ProcessInfo.processInfo.environment["SEARCH_PARK"] != nil
+            LittleWindow.popup(tab, for: self, over: host(of: home), size: size, front: !parked)
+            return tab.web
+        }
         home?.adopt(tab)
         tab.opener = from
         if prefs.returnsFromLinks { tab.returnTo = from }
@@ -1711,7 +1727,22 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
     /// With nobody listening for it, what is left behind is a tab holding the
     /// blank page the flow ended on: nothing to look at, and nothing for
     /// reload to fetch, because there is no longer an address to fetch.
+    /// A page bringing a window of its own forward — the sign-in window a
+    /// "Continue with Google" opened, asked for again with a second click.
+    /// Here that window is a tab, and a tab behind is one that does nothing
+    /// you can see: it comes to the front.
+    @objc(_focusWebView:)
+    func focusWebView(_ webView: WKWebView) {
+        guard let tab = tab(for: webView) else { return }
+        if let little = LittleWindow.holding(tab) { return little.forward() }
+        guard let owner = tab.owner, owner.activeID != tab.id else { return }
+        owner.select(tab)
+        host(of: owner)?.makeKeyAndOrderFront(nil)
+    }
+
     func webViewDidClose(_ webView: WKWebView) {
+        // A page's small window closes with it (see LittleWindow.popup).
+        if let tab = tab(for: webView), let little = LittleWindow.holding(tab) { return little.close() }
         guard let tab = tab(for: webView), let owner = tab.owner else { return }
         // Back to whoever opened it, so you land where you started the sign-in
         // rather than wherever the row happens to put you.
@@ -1782,7 +1813,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
     fileprivate func refuses(_ action: WKNavigationAction, to url: URL, in tab: Tab, on webView: WKWebView) -> Bool {
         if let from = tab.watchedFrom {
             tab.watchedFrom = nil
-            if Shield.shared.judges(from), !Intent.sameSite(url.host()?.lowercased(), from) {
+            if Shield.shared.judges(from), !Intent.sameSite(url.host()?.lowercased(), from), !Intent.signIn(url) {
                 stopped("a blank window sent to another site", in: tab.opener.flatMap { tab.owner?.tab($0) } ?? tab)
                 if let owner = tab.owner {
                     if let opener = tab.opener, let home = owner.tab(opener) { owner.select(home) }
@@ -1802,6 +1833,9 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         let source = action.value(forKey: "sourceFrame") as? WKFrameInfo
         let frameHost = (source?.value(forKey: "request") as? URLRequest)?.url?.host()?.lowercased()
             ?? source?.securityOrigin.host.lowercased()
+        // The page going to sign in with another site (a sign-in done by
+        // redirect rather than in a window) is never a page taken over.
+        if Intent.signIn(url) { return false }
         let verdict = Intent.navigation(
             to: url, from: page,
             frame: frameHost,
@@ -1868,7 +1902,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
     }
 
     func tab(for webView: WKWebView) -> Tab? {
-        (allTabs + windows.compactMap(\.peekTab)).first { $0.built === webView }
+        (allTabs + windows.compactMap(\.peekTab) + LittleWindow.all.map(\.tab)).first { $0.built === webView }
     }
 }
 

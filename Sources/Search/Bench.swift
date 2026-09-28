@@ -1334,12 +1334,14 @@ final class Bench {
             switch request["what"] as? String ?? "" {
             case "keep": LittleWindow.all.last?.keep()
             case "close": LittleWindow.all.last?.close()
+            case "list": break
             default:
                 guard let text = request["what"] as? String, let url = URL(string: text) else { answer(["error": "little needs a url, keep or close"]); return }
                 LittleWindow.show(url, for: browser, front: false)
             }
             answer([
                 "littles": LittleWindow.all.map { $0.tab.address?.absoluteString ?? "" },
+                "littleIDs": LittleWindow.all.map { Bench.short($0.tab) },
                 "tabs": (browser.key?.tabs ?? []).map { ($0.pin != nil ? "PIN " : "") + ($0.address?.host() ?? "blank") },
                 "active": browser.key?.active?.address?.host() ?? "",
             ])
@@ -1666,7 +1668,7 @@ final class Bench {
     /// `window.open` carries no flask and would be out of reach otherwise.
     private func find(_ request: [String: Any], in browser: Browser) -> Tab? {
         guard let ref = (request["id"] as? String)?.lowercased(), !ref.isEmpty else { return nil }
-        return browser.allTabs.first { (Store.testing || $0.bench) && $0.id.uuidString.lowercased().hasPrefix(ref) }
+        return (browser.allTabs + LittleWindow.all.map(\.tab)).first { (Store.testing || $0.bench) && $0.id.uuidString.lowercased().hasPrefix(ref) }
     }
 
     private func missing(_ request: [String: Any]) -> [String: Any] {

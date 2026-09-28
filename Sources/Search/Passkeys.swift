@@ -621,6 +621,19 @@ private struct CBOR {
 /// The page's side: requests handed over, answers handed back.
 final class PasskeyRelay: NSObject, WKScriptMessageHandlerWithReply {
     static let name = "officePasskeys"
+    /// An enabled extension keeps passkeys — a password manager whose page
+    /// script Search's patch goes in ahead of (ExtensionShims.carriesPasskeys).
+    /// Its copy of the patch arrives with its own script, after a page's first
+    /// question: Amazon's passkey setup asked whether this browser can make
+    /// one, heard WebKit's no — an app without Apple's browser entitlement —
+    /// and moved on, a blank page and nothing to set up. So each page gets
+    /// the patch from Search first, saying yes, and the extension answers.
+    @MainActor static var extensionKeeps = false
+    /// The patch as a page gets it while an extension keeps passkeys: the
+    /// extension offers them under the name field, from the first question.
+    nonisolated static var pageForKeeper: String {
+        page.replacingOccurrences(of: "var claimed = false;", with: "var claimed = true;")
+    }
     /// The page's word to Search's side, and the answer back (see `bridge`).
     static let asked = "search-passkeys-ask"
     static let answered = "search-passkeys-answer"

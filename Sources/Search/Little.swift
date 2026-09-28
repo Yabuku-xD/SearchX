@@ -20,6 +20,9 @@ final class LittleWindow: NSObject, NSWindowDelegate {
     private weak var browser: Browser?
     private let window: NSWindow
     private var kept = false
+    /// A page's own window — a sign-in with Google, a payment — rather than
+    /// a link from another app: Escape is the page's, not the window's.
+    private let popup: Bool
 
     /// A link from another app, in a small window in front of it.
     /// `front: false` makes it without showing it — for the bench, which
@@ -39,6 +42,40 @@ final class LittleWindow: NSObject, NSWindowDelegate {
     /// The small windows open now, newest last — for the bench.
     static var all: [LittleWindow] { open }
 
+    /// A window a page opened for itself at a size of its own: a sign-in with
+    /// another site, as Safari and Chrome show it — a small window over the
+    /// page, the page still there behind it, and the answer going back to it
+    /// through window.opener. As a tab it went behind the page at the first
+    /// tab switch, where the page's second click, asking to bring it back,
+    /// reached nothing and the button seemed dead. `front: false` keeps it
+    /// off screen, for the bench.
+    static func popup(_ tab: Tab, for browser: Browser, over parent: NSWindow?, size: CGSize?, front: Bool) {
+        let little = LittleWindow(tab: tab, browser: browser, popup: true)
+        open.append(little)
+        let width = min(max(size?.width ?? 500, 360), 1200)
+        let height = min(max((size?.height ?? 640) + 34, 320), 900)
+        little.window.setContentSize(NSSize(width: width, height: height))
+        if let parent {
+            let frame = little.window.frame
+            little.window.setFrameOrigin(NSPoint(x: parent.frame.midX - frame.width / 2,
+                                                 y: parent.frame.midY - frame.height / 2))
+        } else {
+            little.window.center()
+        }
+        guard front else { return }
+        little.window.makeKeyAndOrderFront(nil)
+    }
+
+    /// The small window a tab is in, if it is in one.
+    static func holding(_ tab: Tab) -> LittleWindow? {
+        open.first { $0.tab === tab }
+    }
+
+    /// In front again, as a page asked (`popup.focus()`).
+    func forward() {
+        window.makeKeyAndOrderFront(nil)
+    }
+
     /// Closed as its button closes it — for the bench.
     func close() { window.performClose(nil) }
 
@@ -48,9 +85,10 @@ final class LittleWindow: NSObject, NSWindowDelegate {
         return open.first { $0.window === window }
     }
 
-    private init(tab: Tab, browser: Browser) {
+    private init(tab: Tab, browser: Browser, popup: Bool = false) {
         self.tab = tab
         self.browser = browser
+        self.popup = popup
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 640),
             styleMask: [.titled, .closable, .resizable, .miniaturizable, .fullSizeContentView],
@@ -70,7 +108,7 @@ final class LittleWindow: NSObject, NSWindowDelegate {
     func take(_ event: NSEvent) -> Bool {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
-        if event.keyCode == 53 && flags.isEmpty || key == "w" && flags == .command {
+        if event.keyCode == 53 && flags.isEmpty && !popup || key == "w" && flags == .command {
             window.performClose(nil)
             return true
         }

@@ -50,7 +50,13 @@ final class Extensions: NSObject, ObservableObject {
 
     let controller: WKWebExtensionController
     let commandShortcuts = ExtensionShortcuts()
-    @Published private(set) var installed: [Installed] = []
+    @Published private(set) var installed: [Installed] = [] {
+        // Whether a password manager's page script is in, for the pages
+        // built from now on (see PasskeyRelay.extensionKeeps).
+        didSet {
+            PasskeyRelay.extensionKeeps = installed.contains { $0.enabled && ExtensionShims.carriesPasskeys(Extensions.folder(for: $0.id)) }
+        }
+    }
     /// The loaded ones, by id.
     @Published private(set) var contexts: [String: WKWebExtensionContext] = [:]
     /// Bumped when any extension's button changes — icon, badge, enabled.
@@ -144,6 +150,8 @@ final class Extensions: NSObject, ObservableObject {
         super.init()
         controller.delegate = self
         installed = (try? JSONDecoder().decode([Installed].self, from: Data(contentsOf: Extensions.list))) ?? []
+        // Set in init, the list's own didSet doesn't run.
+        PasskeyRelay.extensionKeeps = installed.contains { $0.enabled && ExtensionShims.carriesPasskeys(Extensions.folder(for: $0.id)) }
     }
 
     // MARK: - starting

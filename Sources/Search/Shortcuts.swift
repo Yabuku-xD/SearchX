@@ -256,6 +256,14 @@ final class ShortcutStore: ObservableObject {
     }
 
     func isChanged(_ id: String) -> Bool { changed[id] != nil }
+
+    /// A control's tooltip: what it does, and the key that does the same as
+    /// you've set it — none when you've taken that key away, never a key
+    /// that no longer does it.
+    func tip(_ name: String, _ id: String) -> String {
+        guard let combo = key(for: id) else { return name }
+        return name + "   " + combo.display
+    }
     var anyChanged: Bool { !changed.isEmpty }
 
     /// A command you gave `combo`, for the key monitor to run. Only a

@@ -166,6 +166,7 @@ struct Hunt: View {
                     .textFieldStyle(.plain)
                     .foregroundStyle(Palette.ink)
                     .focused(focus)
+                    .accessibilityLabel(prompt.said)
             }
             .font(.system(size: 13))
             if !text.isEmpty {

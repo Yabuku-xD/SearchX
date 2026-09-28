@@ -91,7 +91,7 @@ struct SideBar: View {
                     // reaches the edge, and ⌘S: beside the lights, where
                     // Safari and Arc keep theirs.
                     Door(icon: prefs.sidePosition == .right ? "sidebar.right" : "sidebar.left",
-                         help: window.folded ? "Keep the sidebar open   ⌘S" : "Hide the sidebar   ⌘S") {
+                         help: window.profile.shortcuts.tip(window.folded ? "Keep the sidebar open" : "Hide the sidebar", "view.fold")) {
                         window.toggleFold()
                     }
                     .padding(.trailing, 4)
@@ -290,15 +290,21 @@ struct SideBar: View {
             }
             VStack(spacing: SideBar.gap) {
                 if prefs.usesTabGroups {
-                    ForEach(row.groups) { group in
-                        GroupHeading(window: window, group: group)
-                        ForEach(rest.filter { $0.groupID == group.id && (!group.collapsed || $0.id == row.active) }) { tab in
+                    ForEach(Array(row.groups.enumerated()), id: \.element.id) { index, group in
+                        GroupHeading(window: window, group: group, members: rest.filter { $0.groupID == group.id })
+                            .padding(.top, index > 0 ? SideItem.sectionGap : 0)
+                        let shown = rest.filter { $0.groupID == group.id && (!group.collapsed || $0.id == row.active) }
+                        ForEach(shown) { tab in
                             SideRow(window: window, prefs: prefs, tab: tab, live: tab.id == row.active, pill: pill, close: {})
+                                .padding(.leading, SideItem.indent)
+                                .background(alignment: .topLeading) { GroupLine(last: tab.id == shown.last?.id) }
                         }
                     }
                 }
-                ForEach(rest.filter { !prefs.usesTabGroups || $0.groupID == nil }) { tab in
+                let ungrouped = rest.filter { !prefs.usesTabGroups || $0.groupID == nil }
+                ForEach(ungrouped) { tab in
                     SideRow(window: window, prefs: prefs, tab: tab, live: tab.id == row.active, pill: pill, close: {})
+                        .padding(.top, prefs.usesTabGroups && !row.groups.isEmpty && tab.id == ungrouped.first?.id ? SideItem.sectionGap : 0)
                 }
             }
             newTab
@@ -315,10 +321,12 @@ struct SideBar: View {
         let pinRows = pins == 0 ? 0 : (pins + cols - 1) / cols
         let pinBlock = pinRows == 0 ? 0
             : CGFloat(pinRows) * pinHeight + CGFloat(pinRows - 1) * SideBar.pinGap + 10
-        let visible = prefs.usesTabGroups
-            ? visibleCount(window.sections())
-            : window.tabs.count - pins
-        let loose = CGFloat(visible) * (SideBar.row + SideBar.gap)
+        let sections = prefs.usesTabGroups ? window.sections() : [:]
+        let visible = prefs.usesTabGroups ? visibleCount(sections) : window.tabs.count - pins
+        // The space each section after the first starts with (see Nesting).
+        let groups = prefs.usesTabGroups ? window.tabGroups.count : 0
+        let openings = max(0, groups - 1) + (groups > 0 && !(sections[nil] ?? []).isEmpty ? 1 : 0)
+        let loose = CGFloat(visible) * (SideBar.row + SideBar.gap) + CGFloat(openings) * SideItem.sectionGap
         let bookmarkBlock = showsBookmarks ? CGFloat(visibleBookmarkCount(bookmarks.roots)) * 31 + 42 : 0
         return prefs.topBarHeight + pinBlock + bookmarkBlock + loose + SideBar.row + 8
     }
@@ -480,20 +488,25 @@ struct SideBar: View {
     /// another stays the same view the whole way — two lists, and SwiftUI
     /// made it anew in the second, ending the drag under the hand.
     private var sideItems: [SideItem] {
-        guard prefs.usesTabGroups else { return looseTabs.map(SideItem.row) }
+        guard prefs.usesTabGroups else { return looseTabs.map { .row($0, .loose) } }
         var items: [SideItem] = []
         let held: UUID? = carrying?.id
         let sections = window.sections()
         for group in window.tabGroups {
             let members = sections[group.id] ?? []
-            items.append(.heading(group, members))
+            items.append(.heading(group, members, opens: !items.isEmpty))
             // A group being carried folds its tabs under its heading.
             if held == group.id { continue }
             // Folded, it still shows the tab on screen, and the one in hand.
-            items += (group.collapsed ? members.filter { $0.id == window.activeID || $0.id == held } : members)
-                .map(SideItem.row)
+            let shown = group.collapsed ? members.filter { $0.id == window.activeID || $0.id == held } : members
+            items += shown.enumerated().map { index, tab in
+                .row(tab, Nesting(grouped: true, last: index == shown.count - 1))
+            }
         }
-        items += (sections[nil] ?? []).map(SideItem.row)
+        // The tabs in no group start a section of their own under the last group.
+        items += (sections[nil] ?? []).enumerated().map { index, tab in
+            .row(tab, Nesting(opens: index == 0 && !items.isEmpty))
+        }
         return items
     }
 
@@ -546,15 +559,15 @@ struct SideBar: View {
                 let centre = carrying.top + carrying.travel + carrying.height / 2
                 withAnimation(Motion.settle) {
                     switch item {
-                    case .row(let tab): place(tab, at: centre)
-                    case .heading(let group, _): place(group.id, at: centre)
+                    case .row(let tab, _): place(tab, at: centre)
+                    case .heading(let group, _, _): place(group.id, at: centre)
                     }
                 }
             }
             .onEnded { value in
                 let across = value.translation.width
                 withAnimation(Motion.settle) { carrying = nil }
-                guard case .row(let tab) = item, abs(across) > 40 else { return }
+                guard case .row(let tab, _) = item, abs(across) > 40 else { return }
                 // Off the column's side: into another window, or a window
                 // of its own, as the strip's tabs go.
                 let mouse = NSEvent.mouseLocation
@@ -579,10 +592,10 @@ struct SideBar: View {
         var before: Tab?
         if let next {
             switch items[next] {
-            case .row(let other):
+            case .row(let other, _):
                 group = other.groupID
                 before = other
-            case .heading(let heading, let members):
+            case .heading(let heading, let members, _):
                 let above = window.tabGroups.firstIndex { $0.id == heading.id }.flatMap { $0 > 0 ? window.tabGroups[$0 - 1] : nil }
                 group = above?.id ?? heading.id
                 before = above == nil ? members.first { $0.id != tab.id } : nil
@@ -1089,30 +1102,69 @@ extension EnvironmentValues {
     }
 }
 
+/// Where a tab's row sits among the groups, which it shows: a tab in a group
+/// is set in under the group's heading, on a line that runs down from the
+/// heading's icon to the group's last tab; each section — a group, or the
+/// tabs in none — starts a little further down than rows follow each other.
+private struct Nesting {
+    var grouped = false
+    var last = false
+    var opens = false
+    static let loose = Nesting()
+}
+
 /// One line of the column's list: a group's heading, or a tab.
 private enum SideItem: Identifiable {
-    /// A group's heading, with its tabs as they were when the list was made.
-    case heading(TabGroup, [Tab])
-    case row(Tab)
+    /// A group's heading, with its tabs as they were when the list was made;
+    /// `opens` when a section comes before it.
+    case heading(TabGroup, [Tab], opens: Bool)
+    case row(Tab, Nesting)
 
     var id: UUID {
         switch self {
-        case .heading(let group, _): group.id
-        case .row(let tab): tab.id
+        case .heading(let group, _, _): group.id
+        case .row(let tab, _): tab.id
         }
     }
+
+    /// A section's extra space above it: twice and more the gap between rows.
+    static let sectionGap: CGFloat = 10
+    /// How far a group's tabs are set in, clear of the line beside them.
+    static let indent: CGFloat = 22
 
     @MainActor @ViewBuilder
     func view(window: WindowModel, prefs: Preferences, pill: Namespace.ID) -> some View {
         switch self {
-        case .heading(let group, let members):
+        case .heading(let group, let members, let opens):
             GroupHeading(window: window, group: group, carried: true, members: members)
-        case .row(let tab):
+                .padding(.top, opens ? SideItem.sectionGap : 0)
+        case .row(let tab, let nesting):
             SideRow(window: window, prefs: prefs, tab: tab, live: tab.id == window.activeID,
                     pill: pill, close: { window.close(tab) })
                 .equatable()
                 .modifier(SplitSource(browser: window, tab: tab))
+                .padding(.leading, nesting.grouped ? SideItem.indent : 0)
+                .background(alignment: .topLeading) {
+                    if nesting.grouped { GroupLine(last: nesting.last) }
+                }
+                .padding(.top, nesting.opens ? SideItem.sectionGap : 0)
         }
+    }
+}
+
+/// A group's line beside one of its tabs: under the centre of the heading's
+/// icon, reaching up across the gap to the row above so the pieces meet, and
+/// stopping short on the group's last tab.
+private struct GroupLine: View {
+    let last: Bool
+
+    var body: some View {
+        Capsule()
+            .fill(Palette.faint)
+            .frame(width: 1.5, height: last ? 28 - 6 + 2 : 28 + 2)
+            .offset(x: 10 + 7.5 - 0.75, y: -2)
+            .accessibilityHidden(true)
+            .allowsHitTesting(false)
     }
 }
 

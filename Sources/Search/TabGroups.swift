@@ -68,12 +68,24 @@ struct GroupHeading: View {
             }
             Spacer(minLength: 0)
             if !editing {
+                // Folded, how many tabs it holds, so nothing goes missing
+                // without a trace.
+                if group.collapsed {
+                    Text("\(inGroup.count)")
+                        .font(.system(size: 11).monospacedDigit())
+                        .foregroundStyle(Palette.muted)
+                }
                 Image(systemName: "chevron.down")
                     .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(Palette.muted)
                     .rotationEffect(.degrees(group.collapsed ? -90 : 0))
             }
         }
         .foregroundStyle(Palette.ink)
+        .accessibilityElement(children: editing ? .contain : .ignore)
+        .accessibilityLabel(editing ? "" : "\(group.name), group of \(inGroup.count) tab\(inGroup.count == 1 ? "" : "s")")
+        .accessibilityValue(editing ? "" : (group.collapsed ? "Collapsed" : "Expanded"))
+        .accessibilityAddTraits(editing ? [] : .isButton)
         .padding(.horizontal, 10)
         .frame(width: horizontal ? 126 : nil, height: 28)
         .frame(maxWidth: horizontal ? nil : .infinity, alignment: .leading)

@@ -44,6 +44,7 @@ struct ExtensionsPage: View {
                                         .foregroundStyle(Palette.muted.opacity(0.8))
                                 }
                                 TextField("", text: $link)
+                                    .accessibilityLabel("Link to an extension, or its id")
                                     .textFieldStyle(.plain)
                                     .foregroundStyle(Palette.ink)
                                     .onSubmit(add)

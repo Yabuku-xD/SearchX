@@ -724,6 +724,7 @@ struct BookmarkOutline: View {
 
         private func field(_ text: Binding<String>, _ which: Field, size: CGFloat, tint: Color) -> some View {
             TextField("", text: text)
+                .accessibilityLabel(which == .title ? "Bookmark name" : "Bookmark address")
                 .textFieldStyle(.plain)
                 .font(.system(size: size))
                 .foregroundStyle(tint)
@@ -806,6 +807,7 @@ struct BookmarkCard: View {
             VStack(spacing: 8) {
                 line("Name") {
                     TextField("", text: $title)
+                        .accessibilityLabel("Bookmark name")
                         .textFieldStyle(.plain)
                         .font(.system(size: 12.5))
                         .foregroundStyle(Palette.ink)

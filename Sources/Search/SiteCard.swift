@@ -239,7 +239,7 @@ struct SiteCard: View {
                 .font(MenuMetrics.font)
                 .foregroundStyle(Color(nsColor: .labelColor))
             Spacer(minLength: 24)
-            Step(symbol: "minus", help: "Zoom Out   ⌘-") { window.zoom(by: 1 / 1.1) }
+            Step(symbol: "minus", help: window.profile.shortcuts.tip("Zoom Out", "view.zoomOut")) { window.zoom(by: 1 / 1.1) }
             Button { window.resetZoom() } label: {
                 Text("\(Int((tab.zoom * 100).rounded()))%")
                     .font(MenuMetrics.font)
@@ -249,8 +249,8 @@ struct SiteCard: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Actual Size   ⌘0")
-            Step(symbol: "plus", help: "Zoom In   ⌘+") { window.zoom(by: 1.1) }
+            .help(window.profile.shortcuts.tip("Actual Size", "view.actualSize"))
+            Step(symbol: "plus", help: window.profile.shortcuts.tip("Zoom In", "view.zoomIn")) { window.zoom(by: 1.1) }
         }
         .padding(.leading, MenuMetrics.text)
         .padding(.trailing, MenuMetrics.inset + 4)
