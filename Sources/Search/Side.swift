@@ -753,7 +753,25 @@ private struct PinSquare: View {
     /// stretching to chase the width.
     private var scale: CGFloat { min(width, height) }
 
+    private var radius: CGFloat { scale * 9 / 34 }
+    private var traits: AccessibilityTraits { live ? [.isButton, .isSelected] : .isButton }
+
+    // In two parts: as one chain of modifiers the body takes older compilers
+    // (Xcode 16) longer to type-check than they allow.
     var body: some View {
+        cell
+            .contextMenu { TabMenu(window: window, tab: tab, close: { window.close(tab) }) }
+            .help(tab.label)
+            // A pinned tab says which page it is, not only its letter.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Pinned: " + tab.label)
+            .accessibilityAddTraits(traits)
+            .animation(Motion.quick, value: hovering)
+            .animation(Motion.quick, value: tab.asleep)
+            .transition(settled ? .scale(scale: 0.8).combined(with: .opacity) : .identity)
+    }
+
+    private var cell: some View {
         Group {
             if window.editingPin == tab.id {
                 PinField(window: window, tab: tab)
@@ -769,16 +787,16 @@ private struct PinSquare: View {
         .frame(width: width, height: height)
         .background {
             if live {
-                SelectionGround(radius: scale * 9 / 34)
+                SelectionGround(radius: radius)
                     .matchedGeometryEffect(id: "live", in: pill)
             } else if selected {
-                SelectionGround(radius: scale * 9 / 34)
+                SelectionGround(radius: radius)
             } else {
-                RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous)
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .fill(hovering ? Palette.hover : Palette.wash.opacity(0.55))
             }
         }
-        .contentShape(RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         .modifier(OneClick(double: live) {
             if live && plain { window.editLetter(tab) } else { window.pickTab(tab) }
         })
@@ -788,15 +806,6 @@ private struct PinSquare: View {
         // Put down, like ⌘W: close() is what knows a pin isn't removed.
         .overlay { MiddleClick { window.close(tab) } }
         .onHover { hovering = $0 }
-        .contextMenu { TabMenu(window: window, tab: tab, close: { window.close(tab) }) }
-        .help(tab.label)
-        // A pinned tab says which page it is, not only its letter.
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Pinned: " + tab.label)
-        .accessibilityAddTraits(live ? [.isButton, .isSelected] : .isButton)
-        .animation(Motion.quick, value: hovering)
-        .animation(Motion.quick, value: tab.asleep)
-        .transition(settled ? .scale(scale: 0.8).combined(with: .opacity) : .identity)
     }
 }
 
