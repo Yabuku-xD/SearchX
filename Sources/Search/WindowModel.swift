@@ -48,6 +48,8 @@ final class WindowModel: ObservableObject, Identifiable {
             // from when it was first picked. Its picture for ⌃Tab is taken
             // now too, while its page is still the one on screen.
             guard oldValue != activeID else { return }
+            // A question a page asked while it was out of sight.
+            askHeld()
             if let old = oldValue {
                 linkStatus.dismiss()
                 if let left = tabs.first(where: { $0.id == old }) {
@@ -147,6 +149,8 @@ final class WindowModel: ObservableObject, Identifiable {
         let title: String
         let index: Int
         let groupID: UUID?
+        /// When it was closed, to weigh against a window closed since.
+        var at = Date()
 
         var label: String { title.isEmpty ? Address.pretty(url) : title }
     }
@@ -372,6 +376,7 @@ final class WindowModel: ObservableObject, Identifiable {
     /// behind; closing that blank tab closes the window.
     func close(_ tab: Tab) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        if tab.pin == nil { profile.heldDialogs.removeValue(forKey: tab.id)?.forEach { $0.dismiss() } }
         let partner = removeFromSplit(tab.id)
 
         // A tab whose page is out in the little window takes the window with
@@ -496,11 +501,17 @@ final class WindowModel: ObservableObject, Identifiable {
         return took
     }
 
-    /// ⌘⇧T. Back into the row at the place it left.
+    /// ⌘⇧T. Back into the row at the place it left — or, when a window was
+    /// closed after the last tab was, that whole window, as in Safari and
+    /// Chrome (see Browser.closedWindows).
     func reopen() {
+        if let window = profile.closedWindows.last?.at, window > (ghosts.last?.at ?? .distantPast),
+           profile.reopenWindow() { return }
         guard let ghost = ghosts.last else { return }
         reopen(ghost)
     }
+
+    var canReopen: Bool { !ghosts.isEmpty || !profile.closedWindows.isEmpty }
 
     /// One of them by name, from the History menu.
     func reopen(_ ghost: Ghost) {
@@ -1011,6 +1022,8 @@ final class WindowModel: ObservableObject, Identifiable {
             tab.groupID = nil
             tab.pinHome = tab.address
             tab.pin = tab.monogram
+            // Drawn again even when the tab stays where it is (see unpin).
+            objectWillChange.send()
             // Pinned tabs live at the head of the row, in the order they were
             // pinned, so their letters never move under your hand.
             if let here = tabs.firstIndex(where: { $0.id == tab.id }) {
@@ -1054,6 +1067,11 @@ final class WindowModel: ObservableObject, Identifiable {
         if editingPin == tab.id { editingPin = nil }
         tab.pin = nil
         tab.pinHome = nil
+        tab.pinID = nil
+        // The row is drawn again whether or not the tab moves. Unpinning the
+        // last pin leaves it where it is: `tabs` didn't change, only the tab
+        // did, and the column went on drawing it as a pinned square.
+        objectWillChange.send()
         defer { profile.writeSession() }
         // Back out of the pinned block, to the head of the loose tabs.
         if let here = tabs.firstIndex(where: { $0.id == tab.id }) {
@@ -1513,7 +1531,8 @@ final class WindowModel: ObservableObject, Identifiable {
         }
         let entries = saved.compactMap { tab -> Session.Entry? in
             guard let url = tab.pending ?? tab.address else { return nil }
-            return Session.Entry(url: url.absoluteString, title: tab.title, pin: tab.pin, pinHome: tab.pinHome?.absoluteString, name: tab.name, groupID: tab.groupID,
+            return Session.Entry(url: url.absoluteString, title: tab.title, pin: tab.pin, pinHome: tab.pinHome?.absoluteString,
+                                 pinID: tab.pin == nil ? nil : tab.pinID, name: tab.name, groupID: tab.groupID,
                                  container: tab.container)
         }
         let savedSplits = (splits ?? splitPairs).compactMap { pair -> Session.Split? in
@@ -1545,11 +1564,14 @@ final class WindowModel: ObservableObject, Identifiable {
             // an older version squeezed into the square as "…".
             tab.pin = entry.pin.map { $0.trimmingCharacters(in: .whitespaces).first.map { String($0).uppercased() } ?? "•" }
             tab.pinHome = entry.pin == nil ? nil : entry.pinHome.flatMap(URL.init(string:)) ?? url
+            tab.pinID = entry.pin == nil ? nil : entry.pinID
             tab.groupID = entry.pin == nil && groups.contains(where: { $0.id == entry.groupID }) ? entry.groupID : nil
             indexed.append(tab)
         }
-        let row = indexed.compactMap { $0 }
-        let active = indexed.indices.contains(shape.active) ? indexed[shape.active]?.id : row.first?.id
+        // The pins are every window's (see Pins.swift).
+        let row = reconcilePins(indexed.compactMap { $0 }, space: space)
+        let said = indexed.indices.contains(shape.active) ? indexed[shape.active]?.id : nil
+        let active = said.flatMap { id in row.contains { $0.id == id } ? id : nil } ?? row.first { $0.pin == nil }?.id ?? row.first?.id
         let splits = (shape.splits ?? []).compactMap { pair -> SplitPair? in
             guard indexed.indices.contains(pair.left), indexed.indices.contains(pair.right),
                   let left = indexed[pair.left], let right = indexed[pair.right], left.id != right.id,
@@ -1560,9 +1582,30 @@ final class WindowModel: ObservableObject, Identifiable {
         return Parked(tabs: row, active: active, splits: splits, groups: groups)
     }
 
+    /// A closed window's rows, back: the one for its space on screen, the
+    /// others parked (see Browser.reopenWindow).
+    func restore(rows: [UUID: Session.WindowShape]) {
+        for (space, shape) in rows where space != spaceID {
+            parked[space] = restoredRow(shape, in: space)
+        }
+        if let shape = rows[spaceID] {
+            let row = restoredRow(shape, in: spaceID)
+            showRow(row.tabs, active: row.active, groups: row.groups, splits: row.splits)
+        }
+        if active?.pin != nil { activeID = tabs.first { $0.pin == nil }?.id ?? activeID }
+        guard let active else {
+            newTab()
+            return
+        }
+        active.wake()
+        if profile.prefs.splitViews { wakeSplitPartner() }
+    }
+
     func loadRow(_ space: UUID) -> Parked {
         guard !isPrivate, let shape = Self.row(in: Session.read(space: space), for: id) else {
-            return Parked(tabs: [], active: nil)
+            // A row new to this window still has the space's pins.
+            let pins = reconcilePins([], space: space)
+            return Parked(tabs: pins, active: nil)
         }
         return restoredRow(shape, in: space)
     }
@@ -1589,6 +1632,10 @@ final class WindowModel: ObservableObject, Identifiable {
         if !isPrivate, let shape = Self.row(in: Session.read(space: spaceID), for: id) {
             let row = restoredRow(shape, in: spaceID)
             showRow(row.tabs, active: row.active, groups: row.groups, splits: row.splits)
+        } else if !isPrivate {
+            // A window new to this space still has its pins (see Pins.swift).
+            let pins = reconcilePins([], space: spaceID)
+            if !pins.isEmpty { showRow(pins, active: nil) }
         }
         // Pins come back as letters, their pages left unloaded until opened.
         // A pin that was on screen at quit hands the screen to the first

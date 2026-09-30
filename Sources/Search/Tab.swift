@@ -129,11 +129,19 @@ enum Web {
         // it; a sign-in window opened by its button still opens.
         config.preferences.javaScriptCanOpenWindowsAutomatically = false
         // Saving power, nothing plays until it is clicked (see Power).
-        config.mediaTypesRequiringUserActionForPlayback = Power.savingNow ? .all
-            : Store.settings.bool(forKey: "media.audibleAutoplay") ? [] : .audio
+        config.mediaTypesRequiringUserActionForPlayback = Web.playback
         if Store.testing, !Store.measuring { config.preferences.inactiveSchedulingPolicy = .none }
         inspector(config.preferences)
         return config
+    }
+
+    /// What a page may not play until it is clicked or a key pressed: sound,
+    /// unless Settings allows audible autoplay; everything while saving power
+    /// (see Power) or with Settings › Videos wait for a click (Safari's Never
+    /// Auto-Play).
+    static var playback: WKAudiovisualMediaTypes {
+        if Power.savingNow || Store.settings.bool(forKey: Preferences.waitsKey) { return .all }
+        return Store.settings.bool(forKey: "media.audibleAutoplay") ? [] : .audio
     }
 
     /// Every page view there is, for the bench.
@@ -148,6 +156,43 @@ enum Web {
         guard preferences.responds(to: set) else { return }
         typealias Setter = @convention(c) (AnyObject, Selector, Bool) -> Void
         unsafeBitCast(preferences.method(for: set), to: Setter.self)(preferences, set, on)
+    }
+}
+
+/// Sites you let play sound by themselves, from the site card: Safari's
+/// per-site Allow All Auto-Play. Every other site keeps the default, sound
+/// waiting for a click. Remembered for the site, as its zoom is, and never
+/// from a private tab. Settings › Videos wait for a click wins: with it on,
+/// no site plays by itself.
+///
+/// WebKit takes it for each page as it loads, through the page's own
+/// preferences, under a name outside the public framework — asked for first,
+/// so a WebKit without it only leaves the site waiting for a click. Values,
+/// checked on macOS 26: 0 the default, 1 allow, 2 allow without sound, 3 deny.
+enum Autoplay {
+    private static func key(_ host: String) -> String { "autoplay." + host }
+
+    static func allowed(_ host: String) -> Bool {
+        Store.settings.bool(forKey: key(host))
+    }
+
+    /// Off keeps nothing, as a site at the usual zoom keeps nothing.
+    static func set(_ on: Bool, for host: String) {
+        if on {
+            Store.settings.set(true, forKey: key(host))
+        } else {
+            Store.settings.removeObject(forKey: key(host))
+        }
+    }
+
+    /// For a page about to load at `url`: allowed to play, or left alone.
+    static func apply(to preferences: WKWebpagePreferences, for url: URL, shy: Bool) {
+        guard !shy, let host = url.host(), allowed(host),
+              !Store.settings.bool(forKey: Preferences.waitsKey), !Power.savingNow else { return }
+        let set = NSSelectorFromString("_setAutoplayPolicy:")
+        guard preferences.responds(to: set) else { return }
+        typealias Setter = @convention(c) (AnyObject, Selector, Int) -> Void
+        unsafeBitCast(preferences.method(for: set), to: Setter.self)(preferences, set, 1)
     }
 }
 
@@ -478,6 +523,8 @@ final class Tab: ObservableObject, Identifiable {
     /// is all you need for the five or six pages you keep open all day.
     @Published var pin: String?
     var pinHome: URL?
+    /// Which pin this is, the same in every window (see Pins.swift).
+    var pinID: UUID?
 
     /// The group that holds this ordinary tab in the sidebar.
     @Published var groupID: UUID?
@@ -1051,6 +1098,13 @@ final class Tab: ObservableObject, Identifiable {
             discard()
         }
         configuration = Web.configuration(space: space)
+    }
+
+    /// Settings › Videos wait for a click, changed: the page's next view is
+    /// made the new way. One already made keeps what it was made with —
+    /// WebKit fixes it then — until the tab closes or sleeps.
+    func playbackChanged() {
+        configuration.mediaTypesRequiringUserActionForPlayback = Web.playback
     }
 
     /// Into a container's store, or out to its Space's, the same way a page

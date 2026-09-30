@@ -141,10 +141,9 @@ struct TabBar: View {
                             Door(icon: "square.grid.2x2", help: "Speed Dial") { window.showDial() }
                                 .accessibilityLabel("Speed Dial")
                         }
-                        if browser.prefs.downloadButton {
-                            Door(icon: "arrow.down.circle", help: "Downloads") { browser.hoarding = true }
-                                .accessibilityLabel("Downloads")
-                        }
+                        // All the time when Settings says so; otherwise while a
+                        // download runs, and a moment after (see Fetching.swift).
+                        FetchDoor(browser: browser, fetches: browser.fetches, always: browser.prefs.downloadButton)
                         PanelDoors(window: window)
                     }
                     .background {
@@ -924,8 +923,15 @@ struct TabMenu: View {
         }
             .disabled(!window.canUnload(besides: chosen))
             .help("Let go of every other page except the one on screen")
-        Button("Open in New Window") { window.detach(tab) }
-            .disabled(tab.pin != nil)
+        Menu("Move to Window") {
+            let others = browser.windows.filter { $0 !== window && $0.isPrivate == tab.shy }
+            ForEach(others) { other in
+                Button(other.active?.label ?? "Window") { window.move(tab, to: other, at: other.tabs.count) }
+            }
+            if !others.isEmpty { Divider() }
+            Button("New Window") { window.detach(tab) }
+        }
+        .disabled(tab.pin != nil)
         Button(tab.muted ? "Unmute Tab" : "Mute Tab") { tab.toggleMute() }
         Divider()
         Button("Close Tab", action: close)

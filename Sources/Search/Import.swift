@@ -35,9 +35,11 @@ enum Chromium {
                 .appendingPathComponent(folder, isDirectory: true)
         }
 
-        /// every profile's file, each one directly inside its profile folder.
+        /// every profile's file, each one directly inside its profile folder,
+        /// or in the root itself where a browser keeps its one profile there
+        /// (Opera, Opera GX).
         var files: [URL] {
-            ((try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil, options: .skipsHiddenFiles)) ?? [])
+            ([root] + ((try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil, options: .skipsHiddenFiles)) ?? []))
                 .map { $0.appendingPathComponent("Login Data") }
                 .filter { FileManager.default.fileExists(atPath: $0.path) }
         }
@@ -53,6 +55,13 @@ enum Chromium {
         Source(name: "Vivaldi", folder: "Vivaldi", service: "Vivaldi Safe Storage", account: "Vivaldi"),
         Source(name: "Chromium", folder: "Chromium", service: "Chromium Safe Storage", account: "Chromium"),
         Source(name: "Helium", folder: "net.imput.helium", service: "Helium Storage Key", account: "Helium"),
+        // Chrome's other channels keep their own data, and share Chrome's key.
+        Source(name: "Chrome Beta", folder: "Google/Chrome Beta", service: "Chrome Safe Storage", account: "Chrome"),
+        Source(name: "Chrome Dev", folder: "Google/Chrome Dev", service: "Chrome Safe Storage", account: "Chrome"),
+        Source(name: "Chrome Canary", folder: "Google/Chrome Canary", service: "Chrome Safe Storage", account: "Chrome"),
+        // Opera keeps its one profile in its own folder, not in one inside it.
+        Source(name: "Opera", folder: "com.operasoftware.Opera", service: "Opera Safe Storage", account: "Opera"),
+        Source(name: "Opera GX", folder: "com.operasoftware.OperaGX", service: "Opera Safe Storage", account: "Opera"),
     ]
 
     /// Only the browsers actually on this Mac, with something to read.

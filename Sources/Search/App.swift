@@ -49,7 +49,7 @@ private struct SearchCommands: Commands {
                     .shortcut("file.newPrivateTab", browser.shortcuts)
                 Button("Reopen Closed Tab") { browser.key?.reopen() }
                     .shortcut("file.reopen", browser.shortcuts)
-                    .disabled(browser.key?.ghosts.isEmpty ?? true)
+                    .disabled(!(browser.key?.canReopen ?? false))
                 Divider()
                 Button("Open Address…") { browser.key?.edit() }
                     .shortcut("file.openAddress", browser.shortcuts)
@@ -277,6 +277,8 @@ private struct SearchCommands: Commands {
                 Button("Clear History") { browser.clearHistory() }
                     .shortcut("history.clear", browser.shortcuts)
             }
+            // SearchX › Check for Updates…, under About, as in any Mac app.
+            CommandGroup(after: .appInfo) { UpdateMenuItem() }
             CommandGroup(after: .appSettings) {
                 Button("Settings…") { browser.tuning = true }
                     .shortcut("app.settings", browser.shortcuts)
@@ -627,6 +629,14 @@ struct ContentView: View {
         if browser.managing {
             sheet { PasswordsPanel(browser: browser) } close: { browser.managing = false }
         }
+        if browser.newsShowing, let version = WhatsNew.current {
+            sheet {
+                WhatsNewCard(version: version, prefs: browser.prefs, close: { browser.newsShowing = false }) {
+                    browser.newsShowing = false
+                    browser.key?.open(WhatsNew.releasesPage, foreground: true)
+                }
+            } close: { browser.newsShowing = false }
+        }
         if browser.blockering != nil {
             sheet { BlockerPanel(browser: browser, own: OwnFilters.shared) }
                 close: { browser.blockering = nil }
@@ -789,14 +799,25 @@ struct ContentView: View {
     @ViewBuilder
     private var announcement: some View {
         if let text = browser.announcement {
-            Text(text.said)
+            HStack(spacing: 8) {
+                Text(text.said)
+                    .foregroundStyle(Palette.ink)
+                // A file just saved: the line shows it in the Finder.
+                if browser.announcedFile != nil {
+                    Text("Show in Finder")
+                        .foregroundStyle(Palette.muted)
+                }
+            }
                 .font(.system(size: 12))
-                .foregroundStyle(Palette.ink)
                 .padding(.horizontal, 15)
                 .padding(.vertical, 9)
                 .background(Palette.ground, in: Capsule())
                 .overlay(Capsule().strokeBorder(Palette.hairline, lineWidth: 1))
                 .shadow(color: .black.opacity(0.10), radius: 18, y: 6)
+                .contentShape(Capsule())
+                .onTapGesture {
+                    if let file = browser.announcedFile { NSWorkspace.shared.activateFileViewerSelecting([file]) }
+                }
                 .transition(.rise())
         }
     }
@@ -959,8 +980,13 @@ struct ContentView: View {
         host.isMovableByWindowBackground = false
         // Nor by its title bar, which the strip is all the way down: AppKit
         // would move the window on any drag there, a tab picked up to take
-        // it elsewhere in the row included. DragStrip moves it instead.
-        host.isMovable = false
+        // it elsewhere in the row included. DragStrip moves it instead. The
+        // window stays movable between clicks, though — macOS's Window ›
+        // Move & Resize, its tiling and the tools that arrange windows ask
+        // for a movable one — and is made unmovable only while a press
+        // lasts (see ContentView.watchPresses).
+        host.isMovable = true
+        ContentView.watchPresses()
         // Back, forward, the tabs and the rest, on a Mac with a Touch Bar
         // (see TouchBar.swift). Nothing is made on one without.
         let bar = TouchBar(browser: window)
@@ -1053,6 +1079,29 @@ struct ContentView: View {
         }
     }
 
+    /// Movable between presses, for macOS's Move & Resize and tiling; not
+    /// during one, so that a tab picked up in the strip moves itself and not
+    /// the window (DragStrip moves the window itself). The flag is set before
+    /// the window sees the press, which is when AppKit decides.
+    private static var presses: Any?
+    static func watchPresses() {
+        guard presses == nil else { return }
+        presses = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { event in
+            if let window = event.window, ContentView.appBrowser?.model(owningExactly: window) != nil {
+                window.isMovable = event.type == .leftMouseUp
+            }
+            return event
+        }
+        // A press whose release something else kept — a menu popped up from
+        // it tracks the mouse itself — leaves no window unmovable for long.
+        NotificationCenter.default.addObserver(forName: NSMenu.didEndTrackingNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated {
+                guard let browser = ContentView.appBrowser else { return }
+                for model in browser.windows { browser.host(of: model)?.isMovable = true }
+            }
+        }
+    }
+
     /// The same handling the key monitor gives an event, for the bench to
     /// put a key through the app's own path.
     static var keyHook: ((NSEvent) -> NSEvent?)?
@@ -1123,6 +1172,10 @@ struct ContentView: View {
             if window.makingSpace {
                 window.cancelSpaceCreation()
                 withAnimation(Motion.glide) { window.makingSpace = false }
+                return true
+            }
+            if browser.newsShowing {
+                browser.newsShowing = false
                 return true
             }
             if browser.tuning {
@@ -1416,5 +1469,20 @@ struct ContentView: View {
             return false
         }
         return true
+    }
+}
+
+/// Check for Updates…, or Restart to Update once a newer build is in place.
+/// Its own view, so only the updater's changes redraw it.
+private struct UpdateMenuItem: View {
+    @ObservedObject private var updater = Updater.shared
+
+    var body: some View {
+        if case .ready = updater.stage {
+            Button("Restart to Update") { updater.relaunch() }
+        } else {
+            Button("Check for Updates…") { updater.checkByHand() }
+                .disabled(updater.checking)
+        }
     }
 }

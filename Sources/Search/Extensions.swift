@@ -1076,6 +1076,7 @@ extension Extensions: WKWebExtensionControllerDelegate {
     func webExtensionController(_ controller: WKWebExtensionController, openNewTabUsing configuration: WKWebExtension.TabConfiguration, for extensionContext: WKWebExtensionContext) async throws -> (any WKWebExtensionTab)? {
         guard let browser else { return nil }
         let url = configuration.url ?? URL(string: "about:blank")!
+        try Extensions.mayOpen(url)
         let model: WindowModel
         if let requested = configuration.window as? ExtensionWindow {
             guard let existing = requested.model else { return nil }
@@ -1093,13 +1094,45 @@ extension Extensions: WKWebExtensionControllerDelegate {
     /// asked to go, and the model that was made is answered.
     func webExtensionController(_ controller: WKWebExtensionController, openNewWindowUsing configuration: WKWebExtension.WindowConfiguration, for extensionContext: WKWebExtensionContext) async throws -> (any WKWebExtensionWindow)? {
         guard let browser else { return nil }
+        // A private window isn't something an extension can have here: its
+        // pages would be the extension's to watch while you believed them
+        // private. Refused, as Chrome refuses when incognito isn't allowed.
+        if configuration.shouldBePrivate {
+            throw NSError(domain: "SearchX", code: 2, userInfo: [NSLocalizedDescriptionKey: "Private windows can't be opened by extensions."])
+        }
+        for url in configuration.tabURLs { try Extensions.mayOpen(url) }
+        let front = browser.key
         // A window of its own, as Chrome would: the model that was made is the
         // one the caller is told about, and the pages land in it.
-        let made = browser.open(shy: configuration.shouldBePrivate)
+        let made = browser.open()
         for (index, url) in configuration.tabURLs.enumerated() {
-            made.open(url, foreground: index == 0 && configuration.shouldBeFocused, atEnd: true)
+            made.open(url, foreground: index == 0, atEnd: true)
+        }
+        // The empty tab a new window starts with goes once there are pages.
+        if !configuration.tabURLs.isEmpty {
+            for blank in made.tabs where blank.isBlank && !blank.bench { made.close(blank) }
+        }
+        // The frame asked for, when it is one: parts left unset come as
+        // numbers that aren't (NaN), and AppKit traps on a frame made of them.
+        let asked = configuration.frame
+        if !asked.isNull, [asked.minX, asked.minY, asked.width, asked.height].allSatisfy(\.isFinite),
+           asked.width >= 200, asked.height >= 150 {
+            DispatchQueue.main.async { browser.host(of: made)?.setFrame(asked, display: true) }
+        }
+        if !configuration.shouldBeFocused, let front, front !== made {
+            DispatchQueue.main.async { browser.host(of: front)?.makeKeyAndOrderFront(nil) }
         }
         return model(for: made.id)
+    }
+
+    /// Where an extension may send a tab. Not to javascript:, which would run
+    /// its code in whatever page the tab shows — an extension with no access
+    /// to that site at all — nor to a file on this Mac. Chrome refuses both.
+    static func mayOpen(_ url: URL) throws {
+        let scheme = url.scheme?.lowercased() ?? ""
+        guard scheme != "javascript", scheme != "file" else {
+            throw NSError(domain: "SearchX", code: 1, userInfo: [NSLocalizedDescriptionKey: "Cannot navigate to a \(scheme): URL."])
+        }
     }
 
     func webExtensionController(_ controller: WKWebExtensionController, openOptionsPageFor extensionContext: WKWebExtensionContext) async throws {
@@ -1238,6 +1271,7 @@ final class ExtensionTab: NSObject, WKWebExtensionTab {
 
     func loadURL(_ url: URL, for context: WKWebExtensionContext) async throws {
         guard let tab else { return }
+        try Extensions.mayOpen(url)
         // A website's tab sent to one of an extension's own pages — 1Password
         // does, once a sign-in in its tab has added the account. The page
         // can only be served to a view built from that extension's

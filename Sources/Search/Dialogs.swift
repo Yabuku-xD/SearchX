@@ -9,8 +9,79 @@ import WebKit
 // file picker that never opens. Each one here is the system's own sheet on the
 // window the page is in, which is what every other browser on this Mac shows.
 
+/// A question held for a tab that isn't on screen. WebKit wants every one of
+/// them answered; one let go without being shown answers as dismissed.
+@MainActor
+final class HeldQuestion {
+    private let show: () -> Void
+    private var drop: (() -> Void)?
+
+    init(show: @escaping () -> Void, drop: @escaping () -> Void) {
+        self.show = show
+        self.drop = drop
+    }
+
+    func present() {
+        drop = nil
+        show()
+    }
+
+    func dismiss() {
+        let drop = drop
+        self.drop = nil
+        drop?()
+    }
+
+    deinit { MainActor.assumeIsolated { drop?() } }
+}
+
+extension WindowModel {
+    /// Whether `tab` is on screen in this window: the tab in front, or a page
+    /// beside it in its split.
+    func shows(_ tab: Tab.ID) -> Bool {
+        guard let activeID else { return false }
+        return activeID == tab || (splitPairs.first { $0.contains(activeID) }?.contains(tab) ?? false)
+    }
+
+    /// The questions held for tabs now on screen, asked. Called whenever the
+    /// tab in front changes.
+    func askHeld() {
+        let ready = profile.heldDialogs.keys.filter { id in shows(id) }
+        for id in ready {
+            let held = profile.heldDialogs.removeValue(forKey: id) ?? []
+            DispatchQueue.main.async { held.forEach { $0.present() } }
+        }
+    }
+}
+
 extension Browser {
     // MARK: - alert, confirm, prompt
+
+    /// A page's question goes over its own page only. One from a tab that
+    /// isn't on screen — behind, in another space — waits until you go to
+    /// that tab, as in Safari and Chrome: over the tab in front, a prompt()
+    /// asking for a password would pass for that page's. A tab closed first
+    /// gets the answer a dismissed dialog gives.
+    func ask(from webView: WKWebView, show: @escaping () -> Void, drop: @escaping () -> Void) {
+        let known = allTabs
+        // Questions from tabs that have gone.
+        for id in heldDialogs.keys where !known.contains(where: { $0.id == id }) {
+            heldDialogs.removeValue(forKey: id)?.forEach { $0.dismiss() }
+        }
+        guard let tab = known.first(where: { $0.built === webView }),
+              let owner = windows.first(where: { $0.tab(tab.id) != nil }),
+              !owner.shows(tab.id)
+        else {
+            show()
+            return
+        }
+        // Asked only if the page that asked is still the tab's: a tab put
+        // to sleep meanwhile has let that page go.
+        heldDialogs[tab.id, default: []].append(HeldQuestion(show: { [weak self, weak webView] in
+            guard let self, let webView, self.tab(for: webView) != nil else { drop(); return }
+            show()
+        }, drop: drop))
+    }
 
     func webView(
         _ webView: WKWebView,
@@ -18,9 +89,11 @@ extension Browser {
         initiatedByFrame frame: WKFrameInfo,
         completionHandler: @escaping () -> Void
     ) {
-        let alert = Dialogs.alert(from: frame, saying: message)
-        alert.addButton(withTitle: "OK")
-        Dialogs.show(alert, over: webView) { _ in completionHandler() }
+        ask(from: webView, show: {
+            let alert = Dialogs.alert(from: frame, saying: message)
+            alert.addButton(withTitle: "OK")
+            Dialogs.show(alert, over: webView) { _ in completionHandler() }
+        }, drop: completionHandler)
     }
 
     func webView(
@@ -29,12 +102,14 @@ extension Browser {
         initiatedByFrame frame: WKFrameInfo,
         completionHandler: @escaping (Bool) -> Void
     ) {
-        let alert = Dialogs.alert(from: frame, saying: message)
-        alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Cancel")
-        Dialogs.show(alert, over: webView) { answer in
-            completionHandler(answer == .alertFirstButtonReturn)
-        }
+        ask(from: webView, show: {
+            let alert = Dialogs.alert(from: frame, saying: message)
+            alert.addButton(withTitle: "OK")
+            alert.addButton(withTitle: "Cancel")
+            Dialogs.show(alert, over: webView) { answer in
+                completionHandler(answer == .alertFirstButtonReturn)
+            }
+        }, drop: { completionHandler(false) })
     }
 
     func webView(
@@ -44,16 +119,18 @@ extension Browser {
         initiatedByFrame frame: WKFrameInfo,
         completionHandler: @escaping (String?) -> Void
     ) {
-        let alert = Dialogs.alert(from: frame, saying: prompt)
-        alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Cancel")
-        let field = NSTextField(string: defaultText ?? "")
-        field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
-        alert.accessoryView = field
-        alert.window.initialFirstResponder = field
-        Dialogs.show(alert, over: webView) { answer in
-            completionHandler(answer == .alertFirstButtonReturn ? field.stringValue : nil)
-        }
+        ask(from: webView, show: {
+            let alert = Dialogs.alert(from: frame, saying: prompt)
+            alert.addButton(withTitle: "OK")
+            alert.addButton(withTitle: "Cancel")
+            let field = NSTextField(string: defaultText ?? "")
+            field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
+            alert.accessoryView = field
+            alert.window.initialFirstResponder = field
+            Dialogs.show(alert, over: webView) { answer in
+                completionHandler(answer == .alertFirstButtonReturn ? field.stringValue : nil)
+            }
+        }, drop: { completionHandler(nil) })
     }
 
     // MARK: - choosing a file

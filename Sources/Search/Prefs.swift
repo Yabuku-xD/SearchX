@@ -180,6 +180,15 @@ final class Preferences: ObservableObject {
     @Published var fingerprinting: Bool {
         didSet { store.set(fingerprinting, forKey: "privacy.fingerprinting") }
     }
+    /// Settings › Privacy › Prevent cross-site tracking, turned off: WebKit's
+    /// tracking prevention off, as Safari's same switch does (see
+    /// Store.keepsSignIns). On unless turned off.
+    @Published var keepsSignIns: Bool {
+        didSet {
+            store.set(keepsSignIns, forKey: "sites.keep")
+            Store.keepsSignIns = keepsSignIns
+        }
+    }
     /// tabs load when they're first on screen, not when they're opened. off unless turned on.
     @Published var lazyTabs: Bool {
         didSet { store.set(lazyTabs, forKey: "tabs.lazy") }
@@ -333,6 +342,12 @@ final class Preferences: ObservableObject {
     @Published var audibleAutoplay: Bool {
         didSet { store.set(audibleAutoplay, forKey: "media.audibleAutoplay") }
     }
+    /// Videos wait for a click instead of starting by themselves, as Safari's
+    /// Never Auto-Play has it (see Web.playback). Off unless asked for.
+    @Published var waitsForPlay: Bool {
+        didSet { store.set(waitsForPlay, forKey: Preferences.waitsKey) }
+    }
+    nonisolated static let waitsKey = "media.click"
     @Published var floatBlockedSites: String {
         didSet { store.set(floatBlockedSites, forKey: "float.blockedSites") }
     }
@@ -366,7 +381,7 @@ final class Preferences: ObservableObject {
         didSet { store.set(floatsOnLeave, forKey: "float.leave") }
     }
     /// A newer build is fetched, checked and put in place on its own, as it
-    /// always was. Off, Search still looks once a day and says so, and waits
+    /// always was. Off, SearchX still looks every hour and says so, and waits
     /// for Install in Settings (see Updater.installsOnItsOwn).
     @Published var installsUpdates: Bool {
         didSet {
@@ -454,6 +469,10 @@ final class Preferences: ObservableObject {
         sleepsTabs = store.object(forKey: "tabs.sleep") as? Bool ?? true
         pinsSleep = store.bool(forKey: "pins.sleep")
         fingerprinting = store.bool(forKey: "privacy.fingerprinting")
+        let keeps = store.bool(forKey: "sites.keep")
+        keepsSignIns = keeps
+        // Before the first page is loaded into the store.
+        Store.keepsSignIns = keeps
         lazyTabs = store.bool(forKey: "tabs.lazy")
         mruTabs = store.bool(forKey: "tabs.mru")
         showsReading = store.object(forKey: "tabs.reading") as? Bool ?? true
@@ -500,6 +519,7 @@ final class Preferences: ObservableObject {
         usesTabGroups = store.bool(forKey: "tabs.groups")
         tabPictures = store.bool(forKey: "tabs.pictures")
         audibleAutoplay = store.bool(forKey: "media.audibleAutoplay")
+        waitsForPlay = store.bool(forKey: Preferences.waitsKey)
         floatBlockedSites = store.string(forKey: "float.blockedSites") ?? ""
         let flicks = store.bool(forKey: "float.flicks")
         floatFlicks = flicks

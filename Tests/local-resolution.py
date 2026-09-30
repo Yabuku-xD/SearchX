@@ -962,6 +962,9 @@ def main():
                           lambda v: len(v) == 1 and v[0]['completed'] > 0,
                           'download did not report progress')
             run.report['downloadProgress'] = active
+            fetching = run.ask('probe')['fetching']
+            run.check(fetching['showing'] and not fetching['done'],
+                      'the Downloads button comes while a file downloads')
             run.ask('ui', downloads=True)
             wait(lambda: nodes('download-progress'),
                  lambda ns: any('Cancel' in (n['label'], n['title']) for n in ns),
@@ -971,12 +974,19 @@ def main():
                       'cancel button responds')
             wait(lambda: run.ask('probe')['downloadsInProgress'], lambda v: not v,
                  'cancelled download stayed active')
+            wait(lambda: run.ask('probe')['fetching'], lambda f: not f['showing'],
+                 'a cancelled download took its button away')
             run.check(not (run.profile / 'downloads.json').exists() or
                       not json.loads((run.profile / 'downloads.json').read_text()),
                       'cancelled download is absent from completed history')
             run.ask('ui', downloads=False)
-            run.ask('tap', id=tab, selector='#finish-download')
             destination = downloads / 'download-finish.bin'
+            # The Finder's view of the file: a subscriber started before the
+            # download sees its progress published, rising, then taken off.
+            watcher = subprocess.Popen(['swift', str(ROOT / 'Tests/progress-watch.swift'), str(destination), '40'],
+                                       stdout=subprocess.PIPE, text=True)
+            time.sleep(8)  # the interpreter compiles the watcher first
+            run.ask('tap', id=tab, selector='#finish-download')
             wait(lambda: destination.stat().st_size if destination.exists() else 0,
                  lambda n: n == len(PAYLOAD), 'finished download has wrong byte count')
             wait(lambda: run.ask('probe')['downloadsInProgress'], lambda v: not v,
@@ -988,6 +998,17 @@ def main():
                            if (run.profile / 'downloads.json').exists() else [],
                            lambda v: len(v) == 1, 'completed history missing')
             run.check(history[0]['path'] == str(destination), 'completed download is listed once')
+            finished = run.ask('probe')
+            finder = json.loads(watcher.communicate(timeout=60)[0].strip().splitlines()[-1])
+            run.report['finderProgress'] = finder
+            run.check(finder['seen'] > 1 and finder['last'] > finder['first'] and finder['unpublished'],
+                      f'the file publishes its progress for the Finder and the Dock, then takes it off: {finder}')
+            run.check(finished['fetching']['done'] and finished['fetching']['showing'],
+                      'the Downloads button says the file is in')
+            run.check(finished['announcedFile'] == str(destination),
+                      'the Saved line can show the file in the Finder')
+            wait(lambda: run.ask('probe')['fetching'], lambda f: not f['showing'],
+                 'the Downloads button goes a moment after the last file', )
         elif args.flow == 'pin-home':
             menu('Tabs', 'Pin Tab')
             run.ask('go', id=tab, url=run.origin + '/pin-nested')

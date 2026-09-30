@@ -129,9 +129,14 @@ extension Browser {
     /// one — an NSImage hands a receiving app real bytes to choose from
     /// (TIFF, PNG, whatever it asks for), which is the thing a pasteboard
     /// promise doesn't always give it back on a paste.
+    /// For Copy Image: no cookies kept, nothing cached on disk.
+    static let fetcher = URLSession(configuration: .ephemeral)
+
     func copyImage(at url: URL) {
         Task {
-            guard let (data, _) = try? await URLSession.shared.data(from: url),
+            // Fetched without a cache on disk: the picture may be a private
+            // tab's, and a copy is not a visit.
+            guard let (data, _) = try? await Browser.fetcher.data(from: url),
                   let image = NSImage(data: data)
             else {
                 announce("Couldn't copy that image")

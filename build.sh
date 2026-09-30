@@ -111,11 +111,33 @@ fi
 # The icon, drawn fresh each time — it is thirty lines of Swift, not an asset
 # to keep in step with anything.
 ICONSET="build/AppIcon.iconset"
-rm -rf "$ICONSET"
+ICONDOC="build/AppIcon.icon"
+rm -rf "$ICONSET" "$ICONDOC"
 cp Search.sdef "$APP/Contents/Resources/"
-swift Icon/icon.swift "$ICONSET" > /dev/null
+swift Icon/icon.swift "$ICONSET" "$ICONDOC" > /dev/null
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 rm -rf "$ICONSET"
+# macOS 26's Dark, Clear and Tinted Dock styles read the icon from an asset
+# catalog compiled from the Icon Composer document; without one the Dock
+# darkens the flat image and the mark goes black on black. actool comes with
+# Xcode 26 — with anything older, or only the command-line tools, the app
+# keeps the .icns alone, as before. Only Assets.car is kept: the .icns above
+# stays the disk image's icon and the fallback. Full paths: actool hands the
+# document to a helper that runs elsewhere, and with "build/…" finds nothing.
+ICONNAME=""
+ICONCAR="build/AppIcon.car"
+rm -rf "$ICONCAR"
+mkdir -p "$ICONCAR"
+if xcrun actool "$PWD/$ICONDOC" --compile "$PWD/$ICONCAR" --platform macosx \
+     --minimum-deployment-target "$MINIMUM" --app-icon AppIcon \
+     --output-partial-info-plist "$PWD/$ICONCAR/partial.plist" > /dev/null 2>&1 \
+   && [ -f "$ICONCAR/Assets.car" ]; then
+  cp "$ICONCAR/Assets.car" "$APP/Contents/Resources/Assets.car"
+  ICONNAME="<key>CFBundleIconName</key><string>AppIcon</string>"
+else
+  echo "note: actool from Xcode 26 didn't compile the icon — no Dark or Tinted style this time" >&2
+fi
+rm -rf "$ICONCAR" "$ICONDOC"
 
 # The language files. English is the source — it lives in the code and needs
 # no file — so each folder under Localization/ is one more language the app
@@ -144,6 +166,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$BUILD</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
+  $ICONNAME
   <key>CFBundleDevelopmentRegion</key><string>en</string>
   <key>CFBundleLocalizations</key>
   <array>$(_localizations)</array>

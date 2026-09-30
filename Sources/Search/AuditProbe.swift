@@ -46,6 +46,10 @@ enum AuditProbe {
             window.take(window.offers[index])
         case "dismiss":
             window.dismiss()
+        case "port104":
+            // The pieces brought over from upstream 1.0.4, driven the way
+            // their menus drive them, with the state they leave behind.
+            return Port104Probe.run(request, browser: browser)
         case "update":
             // Settings › About's Update button.
             Updater.shared.update()

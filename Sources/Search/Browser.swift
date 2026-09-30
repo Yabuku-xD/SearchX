@@ -40,6 +40,8 @@ final class Browser: NSObject, ObservableObject {
     let shortcuts = ShortcutStore()
     /// The first-launch walk-through, over everything. Also from the menu.
     @Published var welcoming = false
+    /// The card after an update (see WhatsNew.swift).
+    @Published var newsShowing = false
 
     // MARK: - bookmarks
 
@@ -525,15 +527,26 @@ final class Browser: NSObject, ObservableObject {
 
     /// A line that rises from the bottom, says one thing, and leaves.
     @Published private(set) var announcement: String?
+    /// The file a "Saved …" line is about (see announce).
+    @Published private(set) var announcedFile: URL?
 
 
-    func announce(_ text: String) {
+    /// `file`: one just saved. The line then shows it in the Finder when
+    /// clicked, and stays long enough to be clicked.
+    func announce(_ text: String, file: URL? = nil) {
         announcement = text
+        announcedFile = file
         hush?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.announcement = nil }
+        let work = DispatchWorkItem { [weak self] in
+            self?.announcement = nil
+            self?.announcedFile = nil
+        }
         hush = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.7, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + (file == nil ? 1.7 : 4), execute: work)
     }
+
+    /// Downloads while they happen (see Fetching.swift).
+    let fetches = Fetches()
 
     /// The names extensions asked their downloads to be saved under.
     var namedDownloads: [URL: String] = [:]
@@ -546,6 +559,11 @@ final class Browser: NSObject, ObservableObject {
     lazy var sleepQueue = SleepQueue(browser: self)
     /// Downloads still under way. See `keep(_:)`.
     @Published private(set) var downloading: [WKDownload] = []
+    /// alert(), confirm() and prompt() from tabs that weren't on screen,
+    /// waiting for them to be (see Dialogs.swift).
+    var heldDialogs: [Tab.ID: [HeldQuestion]] = [:]
+    /// Downloads from private tabs, which the Downloads list never shows.
+    var unlisted: Set<ObjectIdentifier> = []
     /// A page being translated, while it is (see Translate.swift).
     @Published var translating: TranslationAsk?
     /// Where translated pages' later text goes while a session can take it.
@@ -588,6 +606,8 @@ final class Browser: NSObject, ObservableObject {
             announce("“Let a script drive SearchX” was turned on outside Settings, and stays off")
         }
         welcoming = !prefs.welcomed
+        // The switches this version brought, once, after an update.
+        if WhatsNew.due(welcoming: welcoming) { newsShowing = true }
         // Once a day, quietly: is there a newer one?
         Updater.shared.checkIfDue { [weak self] line in self?.announce(line) }
         FormRelay.passkeysOffered = prefs.passkeys
@@ -745,6 +765,11 @@ final class Browser: NSObject, ObservableObject {
         hosts[model.id]
     }
 
+    /// The model whose own window this is, and none for any other.
+    func model(owningExactly host: NSWindow) -> WindowModel? {
+        windows.first { self.host(of: $0) === host }
+    }
+
     /// The model behind an NSWindow, for a key event or a notification.
     /// Falls back to the window in front, which is where unclaimed keys go.
     func model(owning host: NSWindow?) -> WindowModel? {
@@ -817,7 +842,14 @@ final class Browser: NSObject, ObservableObject {
         )
         model.folded = prefs.sidebar && prefs.sideHides
         adopt(model)
+        // The space's pins are every window's (see Pins.swift); a private
+        // window keeps none.
+        if privateStore == nil {
+            let pins = model.reconcilePins([], space: model.spaceID)
+            if !pins.isEmpty { model.showRow(pins, active: nil) }
+        }
         model.newTab()
+        if prefs.usesSpaces, privateStore == nil { model.preloadSpaces() }
         BrowserHost.show(model)
         writeSession()
         return model
@@ -848,6 +880,18 @@ final class Browser: NSObject, ObservableObject {
             }
             retired = Retired(id: window.id, space: window.spaceID, rows: rows)
         }
+        // One closed while others stay open goes, tabs and all, and ⇧⌘T
+        // brings it back; quitting is not closing.
+        if !window.isPrivate, !quitting, retired == nil {
+            var rows = [window.spaceID: window.sessionShape(tabs: window.tabs, active: window.activeID)]
+            for (space, row) in window.parked {
+                rows[space] = window.sessionShape(tabs: row.tabs, active: row.active, groups: row.groups, splits: row.splits)
+            }
+            if rows.values.contains(where: { !$0.tabs.isEmpty }) {
+                closedWindows.append(ClosedWindow(space: window.spaceID, rows: rows, frame: host(of: window)?.frame, at: Date()))
+                if closedWindows.count > 10 { closedWindows.removeFirst(closedWindows.count - 10) }
+            }
+        }
         if floating.map({ id in (window.tabs + window.parkedTabs).contains { $0.id == id } }) == true { land() }
         window.closePanel(immediately: true)
         if sceneModel === window { sceneModel = nil }
@@ -864,6 +908,32 @@ final class Browser: NSObject, ObservableObject {
                 Session.write(space: space, Session.Shape(windows: []))
             }
         }
+    }
+
+    /// Windows closed while others were open, newest last, for ⇧⌘T.
+    struct ClosedWindow {
+        let space: UUID
+        let rows: [UUID: Session.WindowShape]
+        let frame: CGRect?
+        let at: Date
+    }
+    private(set) var closedWindows: [ClosedWindow] = []
+    /// Set once the app is quitting: windows closing then are not windows closed.
+    var quitting = false
+
+    /// ⇧⌘T, when the last thing closed was a window: it comes back with its
+    /// rows, in a new window of its own.
+    @discardableResult
+    func reopenWindow() -> Bool {
+        guard let last = closedWindows.popLast() else { return false }
+        let model = WindowModel(profile: self, spaceID: last.space, privateStore: nil)
+        model.folded = prefs.sidebar && prefs.sideHides
+        model.frameRequest = last.frame
+        adopt(model)
+        model.restore(rows: last.rows)
+        BrowserHost.show(model)
+        writeSession()
+        return true
     }
 
     /// The last ordinary window, closed while the app kept running: what it
@@ -960,6 +1030,14 @@ final class Browser: NSObject, ObservableObject {
                 } else {
                     leaveSpaces()
                 }
+            }
+            .store(in: &bag)
+        // Videos waiting for a click, or audible autoplay: every tab's next
+        // page view follows.
+        Publishers.Merge(prefs.$waitsForPlay.dropFirst(), prefs.$audibleAutoplay.dropFirst())
+            .sink { [weak self] _ in
+                guard let self else { return }
+                DispatchQueue.main.async { for tab in self.allTabs { tab.playbackChanged() } }
             }
             .store(in: &bag)
         prefs.$usesTabGroups
@@ -1149,6 +1227,8 @@ final class Browser: NSObject, ObservableObject {
     }
 
     func writeSession() {
+        // The pins as they are now, for every window (see Pins.swift).
+        syncPins()
         // One file per space, every window's row in it (see Session.swift) —
         // the ones on screen now, and the ones parked while their window is
         // in another space.
@@ -1226,12 +1306,57 @@ final class Browser: NSObject, ObservableObject {
     /// ⌘P. The system's own sheet, which is also where "save as PDF" lives.
     func printPage() {
         guard let tab = key?.active, tab.showsPage, let window = NSApp.keyWindow else { return }
+        Browser.printing(tab.web).runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+    }
+
+    /// The print job for a page, or for one frame of it when WebKit names
+    /// one: a page's own print() in a frame prints that frame, as in Safari.
+    /// The frame's printing is outside the public framework, so it is asked
+    /// for first, and a WebKit without it prints the whole page.
+    static func printing(_ web: WKWebView, frame: AnyObject? = nil) -> NSPrintOperation {
         let info = NSPrintInfo.shared
         info.horizontalPagination = .fit
         info.isHorizontallyCentered = false
-        let job = tab.web.printOperation(with: info)
-        job.view?.frame = tab.web.bounds
-        job.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+        let forFrame = NSSelectorFromString("_printOperationWithPrintInfo:forFrame:")
+        let job: NSPrintOperation
+        if let frame, web.responds(to: forFrame) {
+            typealias Make = @convention(c) (AnyObject, Selector, NSPrintInfo, AnyObject) -> NSPrintOperation
+            job = unsafeBitCast(web.method(for: forFrame), to: Make.self)(web, forFrame, info, frame)
+        } else {
+            job = web.printOperation(with: info)
+        }
+        job.view?.frame = web.bounds
+        return job
+    }
+
+    /// A page's own print(): the Print… item in a page's own menu, or ⌘P in
+    /// an editor that keeps the key for itself. WebKit hands it to a delegate
+    /// that answers this name, outside the public framework, and to nobody
+    /// otherwise: the button did nothing at all.
+    ///
+    /// The page waits while the sheet is up, as in Safari. Only a page on
+    /// screen in the window you are in may ask, one sheet at a time; and a
+    /// site that asks again each time the sheet is cancelled asks no more
+    /// after the second cancel within ten seconds, until the tab goes to
+    /// another site (see PrintSheet).
+    @objc(_webView:printFrame:pdfFirstPageSize:completionHandler:)
+    func webView(
+        _ webView: WKWebView,
+        printFrame frame: NSObject,
+        pdfFirstPageSize: CGSize,
+        completionHandler done: @escaping () -> Void
+    ) {
+        guard let window = webView.window, window.isKeyWindow, window.attachedSheet == nil,
+              let tab = tab(for: webView), tab.showsPage,
+              let owner = windows.first(where: { $0.tab(tab.id) != nil }), owner.shows(tab.id),
+              PrintSheet.allows(tab)
+        else { done(); return }
+        let sheet = PrintSheet(tab) { done() }
+        Browser.printing(webView, frame: frame).runModal(
+            for: window, delegate: sheet,
+            didRun: #selector(PrintSheet.printOperationDidRun(_:success:contextInfo:)),
+            contextInfo: Unmanaged.passRetained(sheet).toOpaque()
+        )
     }
 
     /// ⌘⇧P, for lifting one out by hand.
@@ -1301,6 +1426,8 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         if action.targetFrame?.isMainFrame != false {
             let privately = tab(for: webView)?.shy ?? !webView.configuration.websiteDataStore.isPersistent
             Protections.guardFingerprints(Protections.guards(action.request.url?.host(), privately: privately), in: preferences)
+            // A site allowed to play sound by itself (see Autoplay).
+            if let url = action.request.url { Autoplay.apply(to: preferences, for: url, shy: privately) }
         }
         self.webView(webView, decidePolicyFor: action) { decisionHandler($0, preferences) }
     }
@@ -1672,6 +1799,10 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
     func keep(_ download: WKDownload) {
         download.delegate = self
         if !downloading.contains(where: { $0 === download }) { downloading.append(download) }
+        // Noted now, while its page is still there to ask: a private tab's
+        // download is saved where you say, and left out of the list.
+        if let web = download.webView, tab(for: web)?.shy == true { unlisted.insert(ObjectIdentifier(download)) }
+        fetches.start(download)
     }
 
     func cancelDownload(_ download: WKDownload) {
@@ -1679,6 +1810,8 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
             DispatchQueue.main.async {
                 guard let self, let download else { return }
                 self.downloading.removeAll { $0 === download }
+                self.unlisted.remove(ObjectIdentifier(download))
+                self.fetches.fail(download)
                 self.announce("Download cancelled")
             }
         }
@@ -1954,14 +2087,26 @@ extension Browser: WKDownloadDelegate {
         let asked = response.url.flatMap { namedDownloads.removeValue(forKey: $0) }
         let file = whereToSave(asked ?? suggestedFilename)
         completionHandler(file)
-        if let file { announce("Downloading \(file.lastPathComponent)") }
-        else { downloading.removeAll { $0 === download } }
+        if let file {
+            fetches.going(download, to: file)
+            announce("Downloading \(file.lastPathComponent)")
+        } else {
+            downloading.removeAll { $0 === download }
+            unlisted.remove(ObjectIdentifier(download))
+            fetches.fail(download)
+        }
     }
 
     func downloadDidFinish(_ download: WKDownload) {
         downloading.removeAll { $0 === download }
+        let listed = unlisted.remove(ObjectIdentifier(download)) == nil
+        fetches.finish(download, file: download.progress.fileURL, quietly: !listed)
         guard let file = download.progress.fileURL else {
             announce("Download finished")
+            return
+        }
+        guard listed else {
+            announce("Saved \(file.lastPathComponent)", file: file)
             return
         }
         saved(file, from: download.originalRequest?.url)
@@ -2003,7 +2148,7 @@ extension Browser: WKDownloadDelegate {
 
     private func saved(_ file: URL, from source: URL?) {
         loot.add(Keep(name: file.lastPathComponent, from: source?.host() ?? "", path: file.path, date: Date()))
-        announce("Saved \(file.lastPathComponent)")
+        announce("Saved \(file.lastPathComponent)", file: file)
     }
 
     func download(
@@ -2012,6 +2157,8 @@ extension Browser: WKDownloadDelegate {
         resumeData: Data?
     ) {
         downloading.removeAll { $0 === download }
+        unlisted.remove(ObjectIdentifier(download))
+        fetches.fail(download)
         let failure = error as NSError
         announce(failure.domain == NSURLErrorDomain && failure.code == NSURLErrorCancelled
                  ? "Download cancelled" : "Download failed")
@@ -2051,5 +2198,59 @@ final class MenuState: ObservableObject {
         }
         pending = tell
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: tell)
+    }
+}
+
+/// What a page's print() is waiting on: told when the sheet has gone,
+/// printed or cancelled, so WebKit can let the page's script go on. The
+/// sheet's context keeps it alive until then.
+@MainActor
+final class PrintSheet: NSObject {
+    private let done: () -> Void
+    private let tab: Tab.ID
+    private let site: String?
+
+    init(_ tab: Tab, _ done: @escaping () -> Void) {
+        self.tab = tab.id
+        self.site = PrintSheet.site(of: tab)
+        self.done = done
+    }
+
+    /// The sheets a page's print() had cancelled, by tab, on the site it was
+    /// on: its origin, not its address, which the page can change itself
+    /// with history.pushState between two print()s. Two cancels within ten
+    /// seconds and the site asks no more, until the tab goes to another site
+    /// or closes.
+    private struct Cancels {
+        var site: String?
+        var when: [Date] = []
+        var blocked = false
+    }
+    private static var cancelled: [Tab.ID: Cancels] = [:]
+
+    private static func site(of tab: Tab) -> String? {
+        guard let page = tab.address else { return nil }
+        return "\(page.scheme ?? "")://\(page.host() ?? ""):\(page.port.map(String.init) ?? "")"
+    }
+
+    /// Whether this tab's site may bring the sheet up again.
+    static func allows(_ tab: Tab) -> Bool {
+        guard let seen = cancelled[tab.id], seen.site == site(of: tab) else {
+            cancelled[tab.id] = nil
+            return true
+        }
+        return !seen.blocked
+    }
+
+    @objc func printOperationDidRun(_ operation: NSPrintOperation, success: Bool, contextInfo: UnsafeMutableRawPointer?) {
+        if let contextInfo { Unmanaged<PrintSheet>.fromOpaque(contextInfo).release() }
+        if !success {
+            var seen = PrintSheet.cancelled[tab].flatMap { $0.site == site ? $0 : nil } ?? Cancels(site: site)
+            let now = Date()
+            seen.when = seen.when.filter { now.timeIntervalSince($0) < 10 } + [now]
+            if seen.when.count >= 2 { seen.blocked = true }
+            PrintSheet.cancelled[tab] = seen
+        }
+        done()
     }
 }

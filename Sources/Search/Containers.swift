@@ -75,9 +75,12 @@ final class Containers: ObservableObject {
     /// Each container's store, made once, when a tab first needs it.
     private static var stores: [UUID: WKWebsiteDataStore] = [:]
 
+    static var madeStores: [WKWebsiteDataStore] { Array(stores.values) }
+
     static func store(for id: UUID) -> WKWebsiteDataStore {
         if let made = stores[id] { return made }
         let made = WKWebsiteDataStore(forIdentifier: id)
+        if Store.keepsSignIns { Store.followSignIns(made) }
         stores[id] = made
         return made
     }

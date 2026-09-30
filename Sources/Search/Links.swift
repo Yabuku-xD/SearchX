@@ -25,6 +25,35 @@ final class Links: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    /// Windows closing from here on are the app quitting, not windows closed
+    /// for ⇧⌘T to bring back.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        MainActor.assumeIsolated { Links.browser?.quitting = true }
+        return .terminateNow
+    }
+
+    /// The Dock icon's menu: New Window and New Private Window, as Safari's.
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let menu = NSMenu()
+        menu.addItem(withTitle: "New Window", action: #selector(dockNewWindow), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "New Private Window", action: #selector(dockNewPrivateWindow), keyEquivalent: "").target = self
+        return menu
+    }
+
+    @objc private func dockNewWindow() {
+        MainActor.assumeIsolated {
+            NSApp.activate(ignoringOtherApps: true)
+            _ = Links.browser?.open()
+        }
+    }
+
+    @objc private func dockNewPrivateWindow() {
+        MainActor.assumeIsolated {
+            NSApp.activate(ignoringOtherApps: true)
+            _ = Links.browser?.open(shy: true)
+        }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         Links.flush?()
     }

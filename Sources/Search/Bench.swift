@@ -547,6 +547,10 @@ final class Bench {
                     Int(frame.width), Int(frame.height),
                 ]
             }
+            // The button that comes while files do (see Fetching.swift).
+            out["fetching"] = ["showing": browser.fetches.showing, "done": browser.fetches.done,
+                               "fraction": browser.fetches.fraction ?? -1] as [String: Any]
+            out["announcedFile"] = browser.announcedFile?.path ?? ""
             out["downloadsInProgress"] = browser.downloading.map { download in
                 ["url": download.originalRequest?.url?.absoluteString ?? "",
                  "completed": download.progress.completedUnitCount,

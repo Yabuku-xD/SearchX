@@ -106,12 +106,25 @@ enum ShieldRules {
         "#carbonads", "iframe[src*=\"doubleclick.net\"]", "iframe[src*=\"googlesyndication\"]",
         "iframe[src*=\"amazon-adsystem\"]", "iframe[src*=\"adnxs.com\"]",
         "iframe[src*=\"taboola.com\"]", "iframe[src*=\"outbrain.com\"]",
+        // The boxes a site keeps open for an ad while it loads: blocked, they
+        // stay, a banner's height of nothing (upstream #159). Whole class
+        // names from EasyList's generic hiding list, matched as a class token,
+        // never a substring.
+        ".ad-slot", ".ad-slot-container", ".top-banner-ad-container",
+        ".ad-leaderboard", ".ad-billboard", ".ad-giga", ".ad-mpu", ".ad-mrec",
+        ".ad-unit", ".adunit", ".adslot", ".dfp-ad", ".gpt-ad", ".w_ad",
     ]
 
     // AS uses these ad-server attributes on its empty slot containers.
     // Scope the selector to that site; generic class names can hide articles.
     static let wrappers: [(domain: String, selector: String)] = [
         ("en.as.com", "div.ad[data-adtype][data-slot=\"/7811748/as_mob/google/en\"]"),
+        // Names too plain, or too much a site's own, to hide everywhere,
+        // each from EasyList's own rule for that site.
+        ("as.com", ".ad"), ("elpais.com", ".ad"),
+        ("theguardian.com", ".top-fronts-banner-ad-container"),
+        ("independent.co.uk", "#billboard-wrapper"), ("the-independent.com", "#billboard-wrapper"),
+        ("cnn.com", ".ad-slot-header__wrapper"),
     ]
 
     /// Query parameters that only say where a click came from, as uBO's

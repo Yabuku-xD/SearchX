@@ -24,6 +24,8 @@ enum Session {
         var title: String
         var pin: String?
         var pinHome: String? = nil
+        /// The pin's own id, the same in every window (see Pins.swift).
+        var pinID: UUID? = nil
         /// The name you gave the tab, when you gave it one.
         var name: String?
         /// The sidebar group this ordinary tab belongs to, if any.

@@ -6,7 +6,7 @@ import Security
 // Knowing when there is a newer one, and having it ready.
 //
 // No framework, no background daemon: one small JSON file next to the
-// download, read once a day and whenever asked. If it names a build newer
+// download, read at launch, every hour and whenever asked. If it names a build newer
 // than this one, the ZIP it points at is fetched quietly, checked, and put
 // where this bundle is — so the next time the app opens, it is the new one.
 // Chrome's way, without Chrome's machinery. Nothing relaunches on its own; a
@@ -119,8 +119,8 @@ final class Updater: ObservableObject {
         ) { _ in Swap.sweep() }
     }
 
-    /// At launch: once a day, quietly. A test run, pointed at its own feed,
-    /// checks every time.
+    /// At launch, then every hour, quietly. A test run, pointed at its own
+    /// feed, checks every time.
     func checkIfDue(then say: @escaping (String) -> Void) {
         self.say = say
         Swap.sweep()
@@ -137,9 +137,34 @@ final class Updater: ObservableObject {
 
     private var clock: Timer?
 
+    /// SearchX › Check for Updates…: the answer is said in the line at the
+    /// foot of the window, and Settings stays closed.
+    func checkByHand() {
+        switch stage {
+        case .ready(let next):
+            say?("SearchX \(next.version) is ready. Relaunch to use it")
+            return
+        case .fetching(let next):
+            say?("SearchX \(next.version) is downloading…")
+            return
+        default: break
+        }
+        guard !checking else { return }
+        say?("Checking for updates…")
+        check { [weak self] found in
+            guard let self else { return }
+            guard let found else { self.say?("SearchX is up to date"); return }
+            // Waiting for Update in Settings: check() has said so already.
+            if case .waiting = self.stage { return }
+            if case .offered = self.stage { return }
+            self.say?("SearchX \(found.version) is downloading…")
+        }
+    }
+
     private func checkIfDue() {
         let last = Store.settings.object(forKey: lastKey) as? Date ?? .distantPast
-        guard Updater.overridden || Date().timeIntervalSince(last) > 60 * 60 * 20 else { return }
+        // Every hour, give or take the clock's tolerance: one small file.
+        guard Updater.overridden || Date().timeIntervalSince(last) > 60 * 50 else { return }
         check { _ in }
     }
 

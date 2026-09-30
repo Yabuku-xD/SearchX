@@ -375,6 +375,10 @@ struct SettingsPanel: View {
                 Switch(on: $prefs.audibleAutoplay)
             }
             Rule()
+            Line("Videos wait for a click", "Videos don't start by themselves, even without sound. Tabs already open follow once reopened or after they sleep.") {
+                Switch(on: $prefs.waitsForPlay)
+            }
+            Rule()
             Line("Never float video on", "Comma-separated domains, such as youtube.com. Includes their subdomains.") {
                 TextField("example.com", text: $prefs.floatBlockedSites)
                     .textFieldStyle(.roundedBorder)
@@ -491,7 +495,7 @@ struct SettingsPanel: View {
                 Switch(on: $prefs.extensionButton)
             }
             Rule()
-            Line("Show the Downloads button", "Progress, completed files and cancellation are also in History › Downloads") {
+            Line("Always show the Downloads button", "Off, it shows only while something downloads, and fills as it comes. Everything is also in History › Downloads") {
                 Switch(on: $prefs.downloadButton)
             }
         }
@@ -574,7 +578,7 @@ struct SettingsPanel: View {
             }
             if !prefs.pinRows {
                 Rule()
-                Line("Pinned icons per row", "Automatic grows the grid with the number of pins") {
+                Line("Pinned icons per row", "Automatic fills rows evenly, up to four to a row") {
                     Picker("Columns", selection: $prefs.pinColumns) {
                         Text("Automatic").tag(0)
                         ForEach(1...8, id: \.self) { Text("\($0)").tag($0) }
@@ -758,6 +762,10 @@ struct SettingsPanel: View {
                     }
                 }
                 Rule()
+                Line("Prevent cross-site tracking", "As in Safari. Off, sites you rarely open keep their sign-ins, but trackers inside other sites can follow you again. Private windows keep it on.") {
+                    Switch(on: Binding(get: { !prefs.keepsSignIns }, set: { prefs.keepsSignIns = !$0 }))
+                }
+                Rule()
                 Line("Camera and microphone", "What each site was allowed or refused") {
                     Pill("Forget choices") { browser.forgetCaptureChoices() }
                 }
@@ -822,7 +830,7 @@ struct SettingsPanel: View {
             Card {
                 Line(versionTitle, versionDetail) { versionControl }
                 Rule()
-                Line("Install updates on its own", "Off, SearchX still looks once a day and tells you, and installs only when you press Install") {
+                Line("Install updates on its own", "Off, SearchX still looks every hour and tells you, and installs only when you press Install") {
                     Switch(on: $prefs.installsUpdates)
                 }
                 Rule()
@@ -877,8 +885,8 @@ struct SettingsPanel: View {
     private var versionDetail: String {
         switch updater.stage {
         case .none:
-            return updater.lastChecked.map { "Checked \($0.formatted(.relative(presentation: .named))). SearchX checks once a day on its own" }
-                ?? "Checked once a day on its own"
+            return updater.lastChecked.map { "Checked \($0.formatted(.relative(presentation: .named))). SearchX checks every hour on its own" }
+                ?? "Checked every hour on its own"
         case .fetching(let next):
             return next.notes ?? "Quietly, in the background. Nothing you have set is touched"
         case .ready(let next):
